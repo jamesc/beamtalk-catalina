@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "catalina"
+version = "0.1.0"
+description = "Pure-Beamtalk socket server, a port of Thousand Island"
+
+[dependencies]

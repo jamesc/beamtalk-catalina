@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Catalina — main class for the catalina library.
+Object subclass: Catalina
+
+  /// Return a greeting string.
+  class greet => "Hello from catalina!"
