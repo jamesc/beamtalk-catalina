@@ -16,7 +16,8 @@ surface.
   `readTimeout`, ...), so Buccaneer can validate options the way Bandit does.
 - Idiomatic Beamtalk at the surface: a `Handler` you subclass, `Result` for
   expected failures, camelCase selectors.
-- Only dependency: `telemetry` (hex, via `[native.dependencies]`).
+- **Pure Beamtalk, supervisors included.** No `native/*.erl`. The only
+  dependency is `telemetry` (hex, via `[native.dependencies]`).
 
 ## Non-goals (for 1.0)
 
@@ -24,44 +25,41 @@ surface.
   with Elixir log levels (do a minimal `Catalina Logger` later).
 - Protocol parsing of any kind; that is Buccaneer's job.
 
-## The key design decision: how much lives in Erlang
+## Decision: everything in Beamtalk (2026-10-19)
 
-Beamtalk's stdlib supervisors cannot express Thousand Island's tree as-is:
+Beamtalk's stdlib supervisors cannot express Thousand Island's tree today, so
+the port is written against stdlib work tracked in **Linear epic BT-3957**.
+Phase 1 can start now; Phase 2 is blocked until the supervisor issues land.
 
-| Thousand Island needs | Beamtalk stdlib today |
-|---|---|
-| Several server instances per node, each with its own tree | `Supervisor` registers one instance per class (`beamtalk_supervisor.erl:123`) |
-| N connection `DynamicSupervisor`s per server, one per acceptor | one instance per class, same reason |
-| `max_children` on the connection supervisor | not supported |
-| per-child `shutdown:` timeout (`shutdownTimeout` for handlers) | not supported |
-| `which_children` for `connectionPids`, `suspend`, `resume` | not supported |
-| handler stops with a structured reason (`{shutdown, {handshake, R}}`) | `Actor` has `stop` and `kill` only; no stop-with-reason |
-| `handleInfo:` crash = process crash (let-it-crash, `:exception` telemetry) | `handleInfo:` errors are logged and swallowed |
+| Thousand Island needs | Beamtalk stdlib today | Issue |
+|---|---|---|
+| Several server instances per node, N connection supervisors per server | `Supervisor`/`DynamicSupervisor` register one instance per class | BT-3962 |
+| Children, child class and args decided from `start:` options | `class children` / `class childClass` are static | BT-3963 (blocked by 3962) |
+| `max_children` on the connection supervisor | not supported | BT-3964 |
+| per-child `shutdown:` timeout (`shutdownTimeout` for handlers) | not supported | BT-3965 |
+| `which_children`, terminate/restart by id (`suspend`, `resume`, `connectionPids`) | lookup by class only | BT-3966 |
+| handler stops with a structured reason (`{shutdown, {handshake, R}}`) | `stop` / `kill` only | BT-3967 |
+| `handleInfo:` / cast errors crash the actor (let-it-crash) | logged and swallowed | ADR 0134 (accepted), BT-3953 → BT-3958..3961 |
+| raw error term on FFI-wrapped exceptions (`closed` vs `econnreset`) | only `message` string | BT-3954 |
+| `handle_continue` (run before queued messages) | self-sends are direct calls; a self-message queues behind the mailbox | BT-3968 (nice to have) |
+| tuple literal expressions for inet proplists | `Tuple withAll:` | BT-3969 (ergonomics) |
 
-Two ways through:
+The earlier alternative (supervisors in `native/*.erl` with a `native:` facade)
+is dropped: it would have worked, but the point of the port is to make the
+stdlib carry an OTP-shaped library.
 
-**A. Native Erlang for the supervision tree, Beamtalk for everything else.**
-`native/catalina_server_sup.erl`, `catalina_acceptor_pool_sup.erl`,
-`catalina_acceptor_sup.erl` are ~150 lines of declarative OTP. The
-`Catalina` facade is a `native:` Actor (ADR 0056) so a user's Beamtalk
-`Supervisor` can still supervise a server. Listener, Acceptor, Handler, Socket,
-Transports, Config and Telemetry are all Beamtalk.
+Two Beamtalk facts that shape the code (from `docs/ADR/0043`, `0065`):
 
-**B. Extend the stdlib first** (unnamed/multi-instance supervisors,
-`maxChildren`, per-child shutdown, `whichChildren`, `stopWith: reason`), then
-write the tree in Beamtalk.
-
-**Recommendation: A, with the stdlib gaps filed as Beamtalk issues** (list at
-the end). The supervisors are the least interesting code to port and the most
-standard; writing them in Erlang unblocks the port immediately and keeps a
-clear migration path: once the stdlib grows those features, each `.erl` file
-becomes a `.bt` file with no API change. The handler stop-reason gap is handled
-either way by a tiny native helper (`catalina_handler:stop/2` calling
-`gen_server:stop` or `exit/2` with the structured reason) until `Actor` grows
-`stopWith:`.
-
-If you would rather dogfood the stdlib (option B), only Phase 2 changes; Phases
-1, 3-6 are unaffected.
+- **`self foo!` is a direct call, not a cast.** A loop that must yield between
+  iterations (the acceptor) is driven by a self-*message*:
+  `Erlang erlang send: self pid msg: #accept` handled in `handleInfo:`, which
+  re-sends after each `accept`. Blocking inside `handleInfo:` is fine for the
+  acceptor: it owns no other traffic, and the supervisor's exit signal kills
+  it while blocked, exactly as Elixir's `Task` is killed.
+- **No `receive` in Beamtalk.** Thousand Island cancels its read timer *and*
+  flushes a stale `:read_timeout` from the mailbox. Instead, every timer
+  message carries a unique ref (`erlang:make_ref`) stored in state; a
+  `read_timeout` whose ref is stale is ignored. No flush needed.
 
 ## Module map
 
@@ -69,12 +67,12 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 
 | Thousand Island (`lib/`) | LOC | Catalina | Where |
 |---|---|---|---|
-| `thousand_island.ex` | 376 | `src/catalina.bt` — facade: `start:`, `stop`, `listenerInfo`, `connectionPids`, `suspend`, `resume`, `status`, `info` | Beamtalk (`native:` Actor) |
-| `server.ex` | 80 | `native/catalina_server_sup.erl` | Erlang |
+| `thousand_island.ex` | 376 | `src/catalina.bt` — facade: `start:`, `stop`, `listenerInfo`, `connectionPids`, `suspend`, `resume`, `status`, `info` | Beamtalk (class-side over `ServerSupervisor`) |
+| `server.ex` | 80 | `src/server_supervisor.bt` (`restForOne`) | Beamtalk (needs BT-3962/3963) |
 | `shutdown_listener.ex` | 44 | `src/shutdown_listener.bt` | Beamtalk (`Actor` with `terminate:`) |
-| `acceptor_pool_supervisor.ex` | 50 | `native/catalina_acceptor_pool_sup.erl` | Erlang |
-| `acceptor_supervisor.ex` | 59 | `native/catalina_acceptor_sup.erl` (+ `simple_one_for_one` connection sup with `max_children`) | Erlang |
-| `acceptor.ex` | 172 | `src/acceptor.bt` — Actor; accept loop via self-cast | Beamtalk |
+| `acceptor_pool_supervisor.ex` | 50 | `src/acceptor_pool_supervisor.bt` (`oneForOne`, N parameterised children) | Beamtalk (needs BT-3962/3963) |
+| `acceptor_supervisor.ex` | 59 | `src/acceptor_supervisor.bt` (`restForOne`) + `src/connection_supervisor.bt` (`DynamicSupervisor`, `maxChildren`) | Beamtalk (needs BT-3962/3963/3964/3965) |
+| `acceptor.ex` | 172 | `src/acceptor.bt` — Server; accept loop via self-message in `handleInfo:` | Beamtalk |
 | `listener.ex` | 123 | `src/listener.bt` — Actor owning the listen sockets | Beamtalk |
 | `connection.ex` | 106 | `src/connection.bt` — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
 | `handler.ex` | 709 | `src/handler.bt` — abstract `Server` subclass; `src/handler_result.bt` | Beamtalk |
@@ -88,15 +86,14 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 | `logger.ex` | 151 | `src/logger.bt` (minimal) | Beamtalk, Phase 6 |
 | `process_label.ex` | 52 | one call to `proc_lib:set_label/1` in Handler | Beamtalk |
 
-Native helpers beyond the supervisors (small, all prefixed `catalina_`):
+Formerly planned native helpers, now Beamtalk:
 
-- `catalina_opts.erl`: option map → inet proplist. Beamtalk has no tuple
-  literal expression, so `#(#binary, {active, false}, ...)` is awkward to build
-  in `.bt`; do it once in Erlang.
-- `catalina_handler.erl`: `stop/2` with structured reason; `flush/1` to drain a
-  stale `read_timeout` message from the mailbox (needs `receive ... after 0`,
-  which Beamtalk cannot express).
-- `catalina_sendfile.erl`: the SSL `pread`/`send` 1 MiB chunk loop.
+- option map → inet proplist: a small `TransportOptions` class using
+  `Tuple withAll:` until BT-3969 lands.
+- stop with structured reason: `self stopWith:` (BT-3967).
+- stale `read_timeout` flush: unnecessary with the ref-tagged timer idiom above.
+- SSL `sendfile`: the `file:pread` / `ssl:send` 1 MiB loop is a plain
+  `whileTrue:` over FFI calls in `SSLTransport`.
 
 ## Public API sketch
 
@@ -168,17 +165,19 @@ Throwaway `.bt` files proving the shaky assumptions before building on them:
    receive `{tcp, S, Data}` in `handleInfo:`, and re-arm. (Expected: yes.)
 2. `controlling_process` from an acceptor Actor to a handler Actor's `pid`
    works and the ready message arrives before the first `{tcp, ...}`.
-3. An Actor can run a blocking accept loop by self-casting
-   (`acceptLoop!`) and still be shut down by its supervisor when the listen
-   socket closes (accept returns `{error, closed}`).
-4. `gen_server:stop(Pid, {shutdown, {handshake, R}}, Timeout)` from a native
-   helper reaches `terminate: reason` with the compound reason intact.
+3. A `Server` can run a blocking accept loop driven by a self-message
+   (`handleInfo: #accept` → `accept` → re-send `#accept`) and still be shut
+   down by its supervisor when the listen socket closes (accept returns
+   `{error, closed}`), and when killed mid-accept.
+4. A ref-tagged `read_timeout` timer: stale refs are ignored, newer deadline
+   re-arms, `#infinity` cancels — no mailbox flush needed.
 5. `(Erlang telemetry) execute:with:with:` works with the hex dep declared.
 6. Rough cost of the `handleInfo:` round trip per packet (`docs/performance.md`
    says ~1-3 µs per send; measure an echo of 10k small packets).
 
-Outcome: confirm or amend the module map, and decide A vs B if the acceptor
-loop (3) turns out not to be expressible in Beamtalk.
+Outcome: confirm or amend the module map. If (3) fails, that is a new
+stdlib issue under BT-3957 (a `Task`-like transient worker), not a reason to
+drop back to Erlang.
 
 ### Phase 1: Config, TCP transport, Socket (`config_test`, `socket_test` TCP half, `transport_options_test`)
 
@@ -205,10 +204,14 @@ loop (3) turns out not to be expressible in Beamtalk.
 
 ### Phase 2: Supervision tree, Listener, Acceptor, Connection (`listener_test`, `acceptor_test`, `connection_test`, `socket_reuse_test`)
 
-- Native: `catalina_server_sup` (`rest_for_one`: listener, acceptor pool,
-  shutdown listener), `catalina_acceptor_pool_sup` (`one_for_one`,
-  `1..numAcceptors`, ids `acceptor-N`), `catalina_acceptor_sup`
-  (`rest_for_one`: connection sup with `max_children`, then acceptor).
+**Blocked by BT-3962, BT-3963, BT-3964, BT-3965** (multi-instance and
+start-time-configured supervisors, `maxChildren`, per-child shutdown).
+
+- `ServerSupervisor` (`restForOne`: listener, acceptor pool, shutdown
+  listener), `AcceptorPoolSupervisor` (`oneForOne`, `1..numAcceptors`
+  parameterised children with ids `acceptor-N`), `AcceptorSupervisor`
+  (`restForOne`: `ConnectionSupervisor` with `maxChildren`, then acceptor).
+  All take the `ServerConfig` as start args.
 - `Listener`: opens `numListenSockets` sockets (sockets after the first bind to
   the actual port of the first, handling port 0); answers `listenerInfo` and
   `acceptorInfo: id` (round-robin socket `rem(id-1, n)+1`); closes sockets on
@@ -228,7 +231,8 @@ loop (3) turns out not to be expressible in Beamtalk.
   `controlling_process` failure close the socket and `terminateChild`.
 - `ShutdownListener`: traps exits (by overriding `terminate:`), and on
   shutdown calls `Listener stop` so acceptors drain.
-- `Catalina start:` facade (`native:` Actor over `catalina_server_sup`).
+- `Catalina start:` facade (class-side; returns the `ServerSupervisor`
+  instance).
 - Tests use the `FlakyTransport` / `OwnershipErrorTransport` fakes from the
   Elixir suite, written as Beamtalk classes implementing `Transport`.
 
@@ -241,17 +245,18 @@ loop (3) turns out not to be expressible in Beamtalk.
   S, Data}`, `{tcp_closed|ssl_closed, S}`, `{tcp_error|ssl_error, S, R}`,
   `read_timeout`, then user `handleInfo:` via a `handleUserInfo:` hook.
 - Every user callback runs through `invokeCallback:` which catches, emits
-  `:exception`, and re-raises; because the stdlib swallows `handleInfo:`
-  errors, the re-raise becomes an explicit `catalina_handler:stop` with the
-  error as reason so the process really dies (let-it-crash parity).
+  `:exception`, and re-raises. With ADR 0134 (BT-3958) the re-raise crashes
+  the handler the way it does in Elixir; until it lands, re-raise via
+  `self stopWith: error` (BT-3967).
 - Continuation handling as in `handle_continuation/2` including the
   `switch_transport` path (note the Elixir quirk that passes an integer
   timeout as a GenServer timeout; decide whether to reproduce or fix, and
   document).
 - Lazy read timer: `readDeadline`, `send_after` only when no timer is running
   or the new deadline is earlier; on fire re-arm for the remainder or time out;
-  cancel flushes a stale `read_timeout` message (`catalina_handler:flush/1`);
-  `#infinity` cancels.
+  timer messages are ref-tagged so a stale one is ignored instead of flushed;
+  `#infinity` cancels. Stops use `self stopWith:` (BT-3967) with the same
+  reasons as `handler.ex`.
 - `terminate:` routing exactly as in `handler.ex`: `premature_conn_closing` →
   no-op; `read_timeout` → `handleTimeout:`; `shutdown` → `handleShutdown:`;
   `{shutdown, {handshake|silent_termination|upgrade, R}}` → `handleError:`;
@@ -266,7 +271,8 @@ loop (3) turns out not to be expressible in Beamtalk.
 - `SSLTransport`: `listen` validates a key option and a cert option, calls
   `ssl:listen`; `accept` = `ssl:transport_accept`; `handshake:timeout:` =
   `ssl:handshake/2` normalising `{ok, S, _Ext}`; `upgrade` =
-  `ssl:handshake(Sock, Opts)`; `sendfile` via `catalina_sendfile`.
+  `ssl:handshake(Sock, Opts)`; `sendfile` as a `file:pread` / `ssl:send`
+  loop in Beamtalk.
 - Handshake runs in the handler process bounded by `handshakeTimeout`;
   failure stops with `{shutdown, {handshake, R}}`.
 - Fixtures: copy `test/support/{ca,cert,key}.pem` and `sendfile` into
@@ -285,22 +291,22 @@ loop (3) turns out not to be expressible in Beamtalk.
   `exception` carries `kind`/`reason`/`stacktrace`; process-dictionary marker to
   avoid a second `stop` after `exception`.
 - A test helper equivalent to `support/telemetry_helpers.ex` that forwards
-  events for a given handler to the test process (likely `native/test` or a
-  small `.erl` under `test/`).
+  events for a given handler to the test process: `telemetry:attach` with a
+  Beamtalk block as the handler fun (blocks are plain funs across the FFI).
 
 ### Phase 6: Server operations and polish (`server_test`, 23 tests)
 
 - `suspend` (terminate each `acceptor` child, then `shutdown_listener`, then
   `listener`), `resume` (reverse), `status` (`#suspended` when no listener),
-  `info`, `connectionPids`, `stop:` with wait.
+  `info`, `connectionPids`, `stop:` with wait. Needs BT-3966 (child control
+  by id).
 - Draining: `shutdownTimeout` per handler child; `handleShutdown:` on
   `shutdown`; brutal kill on overrun.
 - `numListenSockets` > 1 with `reuseport`/`reuseport_lb`; Unix domain sockets
   (`{local, path}`, nodelay suppressed).
 - Minimal `Logger` (attach a telemetry handler at `#error`/`#info`/`#debug`/`#trace`).
 - README (Installation / Usage / Classes / Development, as in beamtalk-http),
-  AGENTS.md updated with the Erlang/Beamtalk split and the Thousand Island
-  cross-reference, `///` docs with examples on every public class.
+  AGENTS.md updated with the Thousand Island cross-reference, `///` docs with examples on every public class.
 
 ### Phase 7: Buccaneer alignment
 
@@ -315,29 +321,16 @@ forwarding from a delegating handler. Tag `v0.1.0`.
 
 Thousand Island is ~3,500 lines of library and ~3,000 lines of tests. Expect
 the Beamtalk port to come in a little larger because of FFI plumbing. Rough
-split: Phase 0-1 one day, Phase 2 two days, Phase 3 three days, Phase 4-5 two
-days, Phase 6-7 one to two days.
+split for the port itself: Phase 0-1 one day, Phase 2 two days, Phase 3 three
+days, Phase 4-5 two days, Phase 6-7 one to two days — plus the stdlib work in
+BT-3957, which gates Phase 2 onwards.
 
-## Beamtalk gaps surfaced by this port
+## Beamtalk work this port depends on
 
-Worth filing as issues against `beamtalk` whether or not option B is chosen:
-
-1. **Multi-instance supervisors.** `Supervisor` and `DynamicSupervisor`
-   register one instance per class; a library cannot create N of them.
-2. **`DynamicSupervisor maxChildren`**, per-child **shutdown timeout** in
-   `SupervisionSpec`, and **`whichChildren`** / child lookup by id.
-3. **`Actor stopWith: reason`** (structured exit reason reaching `terminate:`).
-4. **Opt-in let-it-crash for `handleInfo:`** (errors are currently logged and
-   swallowed, so a buggy handler never restarts).
-5. **`handle_continue` equivalent** (self-cast works but reorders behind
-   already-queued messages).
-6. **Tuple literal expression syntax** (`{active, once}`) for inet-style
-   proplists; today it needs `Tuple withAll:`.
-7. **Binary pattern matching** (BT-663): not needed here, blocking for
-   Buccaneer's HTTP/1 parser.
-8. **Nightly built on OTP 28 doesn't load on OTP 27** while docs and
-   `otp-support.toml` claim 27 is supported (found earlier today via the
-   `beamtalk new` CI template).
+All tracked under **epic BT-3957**; see the table in the Decision section.
+The two outside the stdlib: BT-3955 (`beamtalk new` CI template pinned OTP 27
+while nightlies need 28; fixed in PR jamesc/beamtalk#4428) and its follow-up,
+that `otp-support.toml` still claims OTP 27 is supported.
 
 ## References
 
