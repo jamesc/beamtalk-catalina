@@ -30,18 +30,21 @@ surface.
 Beamtalk's stdlib supervisors cannot express Thousand Island's tree today, so
 the port is written against stdlib work tracked in **Linear epic BT-3957**.
 Phase 1 can start now; Phase 2 is blocked until the supervisor issues land.
+The supervisor design those issues implement is **ADR 0135** (Supervisor
+Instances and Start Arguments, accepted 2026-10-20); Phase 2 below is written
+against it.
 
 | Thousand Island needs | Beamtalk stdlib today | Issue |
 |---|---|---|
-| Several server instances per node, N connection supervisors per server | `Supervisor`/`DynamicSupervisor` register one instance per class | BT-3962 |
-| Children, child class and args decided from `start:` options | `class children` / `class childClass` are static | BT-3963 (blocked by 3962) |
-| `max_children` on the connection supervisor | not supported | BT-3964 |
-| per-child `shutdown:` timeout (`shutdownTimeout` for handlers) | not supported | BT-3965 |
-| `which_children`, terminate/restart by id (`suspend`, `resume`, `connectionPids`) | lookup by class only | BT-3966 |
+| Children, child class and limits computed from `init(arg)`, and `self()` passed to children | class-side `class children` / `class childClass` / ..., with no args and no handle | BT-3963 (ADR 0135 §2: instance-side `childSpecs`, `strategy`, `childClass`, `maxChildren`, `childShutdown`, reading `self args`; lands first) |
+| Several server instances per node, N acceptor and connection supervisors per server | `Supervisor`/`DynamicSupervisor` register one instance per class | BT-3962 (ADR 0135 §1, §3: `spawnWith:`, `spawnWith:as:`, `named:`, `supervisionSpec withArgs:` on supervisor classes, integer child ids; after BT-3963) |
+| `max_children` on the connection supervisor | not supported | BT-3964 (per server via instance-side `maxChildren`, BT-3963) |
+| `shutdown:` timeout for handler children (`shutdownTimeout`) | not supported | BT-3965 (per server via instance-side `childShutdown`, BT-3963; BT-3972 cancelled) |
+| `which_children`, terminate/restart by id (`suspend`, `resume`, `connectionPids`) | lookup by class only | BT-3966 (`whichChildren`, `childWithId:`, `terminateChild:`/`restartChild:` by id, `DynamicSupervisor children`) |
 | handler stops with a structured reason (`{shutdown, {handshake, R}}`) | `stop` / `kill` only | BT-3967 |
 | `handleInfo:` / cast errors crash the actor (let-it-crash) | logged and swallowed | ADR 0134 (accepted), BT-3953 → BT-3958..3961 |
 | raw error term on FFI-wrapped exceptions (`closed` vs `econnreset`) | only `message` string | BT-3954 |
-| `handle_continue` (run before queued messages) | self-sends are direct calls; a self-message queues behind the mailbox | BT-3968 (nice to have) |
+| `handle_continue` (run before queued messages) | self-sends are direct calls; a self-message queues behind the mailbox | BT-3968 (`self continueWith:`; needed for the acceptor's first parent call, see Phase 2) |
 | tuple literal expressions for inet proplists | `Tuple withAll:` | BT-3969 (ergonomics) |
 
 The earlier alternative (supervisors in `native/*.erl` with a `native:` facade)
@@ -67,12 +70,12 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 
 | Thousand Island (`lib/`) | LOC | Catalina | Where |
 |---|---|---|---|
-| `thousand_island.ex` | 376 | `src/catalina.bt` — facade: `start:`, `stop`, `listenerInfo`, `connectionPids`, `suspend`, `resume`, `status`, `info` | Beamtalk (class-side over `ServerSupervisor`) |
-| `server.ex` | 80 | `src/server_supervisor.bt` (`restForOne`) | Beamtalk (needs BT-3962/3963) |
+| `thousand_island.ex` | 376 | `src/catalina.bt` — facade: `start:`, `stop`, `listenerInfo`, `connectionPids`, `suspend`, `resume`, `status`, `info` | Beamtalk (class-side over `ServerSupervisor spawnWith:`) |
+| `server.ex` | 80 | `src/server_supervisor.bt` (`restForOne`; `childSpecs` from `self args`, passes `#server => self`) | Beamtalk (needs BT-3963, BT-3962) |
 | `shutdown_listener.ex` | 44 | `src/shutdown_listener.bt` | Beamtalk (`Actor` with `terminate:`) |
-| `acceptor_pool_supervisor.ex` | 50 | `src/acceptor_pool_supervisor.bt` (`oneForOne`, N parameterised children) | Beamtalk (needs BT-3962/3963) |
-| `acceptor_supervisor.ex` | 59 | `src/acceptor_supervisor.bt` (`restForOne`) + `src/connection_supervisor.bt` (`DynamicSupervisor`, `maxChildren`) | Beamtalk (needs BT-3962/3963/3964/3965) |
-| `acceptor.ex` | 172 | `src/acceptor.bt` — Server; accept loop via self-message in `handleInfo:` | Beamtalk |
+| `acceptor_pool_supervisor.ex` | 50 | `src/acceptor_pool_supervisor.bt` (`oneForOne`, `numAcceptors` children with integer ids `1..n`) | Beamtalk (needs BT-3963, BT-3962) |
+| `acceptor_supervisor.ex` | 59 | `src/acceptor_supervisor.bt` (`restForOne`, passes `#parent => self`) + `src/connection_supervisor.bt` (`DynamicSupervisor`; `childClass`, `maxChildren`, `childShutdown` from `self args`) | Beamtalk (needs BT-3963, BT-3962, BT-3964, BT-3965) |
+| `acceptor.ex` | 172 | `src/acceptor.bt` — Server; parent lookups in a `continueWith:` step, then accept loop via self-message in `handleInfo:` | Beamtalk (needs BT-3966, BT-3968) |
 | `listener.ex` | 123 | `src/listener.bt` — Actor owning the listen sockets | Beamtalk |
 | `connection.ex` | 106 | `src/connection.bt` — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
 | `handler.ex` | 709 | `src/handler.bt` — abstract `Server` subclass; `src/handler_result.bt` | Beamtalk |
@@ -135,7 +138,7 @@ Bandit depends on:
 | `{:continue, st}` | `HandlerResult continue: st` |
 | `{:continue, st, timeout}` | `HandlerResult continue: st timeout: ms` |
 | `{:continue, st, {:persistent, t}}` | `HandlerResult continue: st persistentTimeout: ms` |
-| `{:continue, st, {:continue, c}}` | `HandlerResult continue: st then: #selector` (self-cast; Beamtalk has no `handle_continue`) |
+| `{:continue, st, {:continue, c}}` | `HandlerResult continue: st then: #selector` (a thin wrapper over `self continueWith:`, BT-3968) |
 | `{:switch_transport, {mod, opts}, st}` | `HandlerResult switchTransport: SSLTransport options: opts state: st` |
 | `{:close, st}` | `HandlerResult close: st` |
 | `{:error, reason, st}` | `HandlerResult error: reason state: st` |
@@ -204,37 +207,208 @@ drop back to Erlang.
 
 ### Phase 2: Supervision tree, Listener, Acceptor, Connection (`listener_test`, `acceptor_test`, `connection_test`, `socket_reuse_test`)
 
-**Blocked by BT-3962, BT-3963, BT-3964, BT-3965** (multi-instance and
-start-time-configured supervisors, `maxChildren`, per-child shutdown).
+**Blocked by**, in order: **BT-3963** (instance-side supervisor
+configuration reading `self args`), then **BT-3962** (`spawnWith:` /
+`spawnWith:as:` on supervisor classes, `supervisionSpec withArgs:` for nested
+supervisors, integer child ids), then **BT-3966** (`childWithId:`,
+`whichChildren`, by-id `terminateChild:`/`restartChild:`,
+`DynamicSupervisor children`). Plus **BT-3968** (`continueWith:`) for the
+acceptor's first parent call, and BT-3964 / BT-3965 (`maxChildren`,
+`childShutdown`), which BT-3963 makes per instance.
 
-- `ServerSupervisor` (`restForOne`: listener, acceptor pool, shutdown
-  listener), `AcceptorPoolSupervisor` (`oneForOne`, `1..numAcceptors`
-  parameterised children with ids `acceptor-N`), `AcceptorSupervisor`
-  (`restForOne`: `ConnectionSupervisor` with `maxChildren`, then acceptor).
-  All take the `ServerConfig` as start args.
+The design is ADR 0135's. Every supervisor is configured on the **instance
+side**: `childSpecs`, `strategy`, `childClass`, `maxChildren`,
+`childShutdown` are instance methods that the runtime calls inside the new
+supervisor's own `init/1`, so `self args` is its start args (OTP's
+`init(Arg)`) and `self` is its own handle (OTP's `self()` in `init/1`). No
+class-side configuration, and no `supervise`: `supervise` is the idempotent
+per-class singleton, and Catalina needs one tree per running server.
+
+The tree, one per `Catalina start:`:
+
+```
+ServerSupervisor (restForOne)                  args: ServerConfig
+├── #listener          Listener                               args: {config}
+├── #acceptorPool      AcceptorPoolSupervisor (oneForOne)     args: {server, config}
+│   └── i (1..numAcceptors)  AcceptorSupervisor (restForOne)  args: {id, server, config}
+│       ├── #connections  ConnectionSupervisor (dynamic)      args: config
+│       └── #acceptor     Acceptor                            args: {id, parent, server, config}
+└── #shutdownListener  ShutdownListener                       args: {server}
+```
+
+**Server start.** `Catalina start:` builds a `ServerConfig` and calls
+`ServerSupervisor spawnWith: config`: an anonymous, unlinked instance, so a
+node (and a test suite) can run any number of servers. With a `#name` option
+it calls `(ServerSupervisor spawnWith: config as: name) unwrap` instead, so
+the server is visible by name to observer, remote shells and `sys:get_state`
+(Thousand Island's `supervisor_options: [name: ...]`), and
+`ServerSupervisor named: name` finds it. Names must come from a bounded set
+(ADR 0079); never build one from runtime data. A taken name is
+`Result error:` with kind `#name_registered`. `srv stop` stops one server and
+leaves the others running.
+
+The supervisors, starting from ADR 0135's Catalina example:
+
+```beamtalk
+Supervisor subclass: ServerSupervisor
+  strategy => #restForOne
+  childSpecs => #(
+    (Listener supervisionSpec withId: #listener withRestart: #transient
+       withArgs: #{#config => self args}),
+    (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool
+       withArgs: #{#server => self, #config => self args}),
+    (ShutdownListener supervisionSpec withId: #shutdownListener withRestart: #permanent
+       withArgs: #{#server => self}))
+
+Supervisor subclass: AcceptorPoolSupervisor
+  childSpecs =>
+    ((1 to: (self args at: #config) numAcceptors) collect: [:i |
+      AcceptorSupervisor supervisionSpec withId: i
+        withArgs: #{#id => i, #server => (self args at: #server), #config => (self args at: #config)}]) asList
+
+Supervisor subclass: AcceptorSupervisor
+  strategy => #restForOne
+  childSpecs => #(
+    (ConnectionSupervisor supervisionSpec withId: #connections withArgs: (self args at: #config)),
+    (Acceptor supervisionSpec withId: #acceptor withRestart: #transient
+       withArgs: #{#id => (self args at: #id), #parent => self,
+                   #server => (self args at: #server), #config => (self args at: #config)}))
+
+DynamicSupervisor(Handler) subclass: ConnectionSupervisor
+  childClass => self args handler
+  maxChildren => self args numConnections
+  childShutdown => self args shutdownTimeout
+```
+
+- **Acceptor pool.** `AcceptorSupervisor supervisionSpec withId: i
+  withArgs: ...` with **integer** ids `1..numAcceptors` (Thousand Island uses
+  `"acceptor-#{i}"`): integers do not touch the atom table and are what
+  `whichChildren` reports (`#(1, 2, ...)`). Nested supervisors are anonymous,
+  so 100 `AcceptorSupervisor`s under one pool, and several pools on one node,
+  do not collide.
+- **Per-server limits.** `ConnectionSupervisor` reads `childClass` (the
+  user's handler), `maxChildren` (`numConnections`) and `childShutdown`
+  (`shutdownTimeout`) from `self args`, so each server has its own limits.
+  They are validated once in `init/1`; a bad value fails the server's start
+  with `#supervisor_start_failed` and the validator's hint.
+- **Restart policies** follow Thousand Island: `Listener` and `Acceptor` are
+  `#transient` (an acceptor that sees `closed` exits normally and stays down;
+  `restartChild:` can still bring it back in `resume`), nested supervisors
+  default to `#permanent`. ADR 0135's example shows the acceptor as
+  `#permanent`; `#transient` is the Thousand Island behaviour (`use Task,
+  restart: :transient`).
+- **Configuration methods never message `self`.** They run inside the
+  supervisor's `init/1`: reading `self args` is fine, passing `self` as a
+  value (`#parent => self`, `#server => self`) is the intended use, but
+  `self count` or `self childWithId:` there fails the start at once
+  (`calling_self` → `#supervisor_start_failed`).
+- **Arg lifetime.** Args are replayed on every OTP restart, so they may hold
+  only things that outlive the child: the `ServerConfig` and ancestor
+  handles. Never a socket, a sibling's pid or a caller's pid.
+
+**Parent handle and the hang rule.** `#parent => self` gives the acceptor its
+`AcceptorSupervisor`, and `#server => self` (threaded down through the pool)
+gives it the `ServerSupervisor`, replacing Thousand Island's
+`{server_pid, self(), acceptor_id, config}`. The rule (ADR 0135): **never
+synchronously call a supervisor from code that supervisor is waiting on.** A
+supervisor waits on its own and its nested supervisors' configuration
+methods, and on the `initialize` of `withName:` / `withClassMethod:` actor
+children, during the initial start, every OTP restart and every
+`startChild:`. So:
+
+- No parent or server calls from any `childSpecs` / `childClass` / ...
+  method, and the acceptor is not a `withName:` child.
+- The acceptor makes its first parent call from a **`continueWith:` step**
+  (BT-3968), not from `initialize` directly, **with an explicit timeout** on
+  any actor call it makes there (`listener withTimeout: ...`), or tolerates a
+  retry. A supervisor lookup made while the tree is still starting (100
+  acceptor subtrees) waits until the ancestor has started its remaining
+  children; under ADR 0134 a timeout raised there crashes the acceptor and,
+  if restarted, loops.
+
+```beamtalk
+Server subclass: Acceptor
+  state: id = nil
+  state: parent = nil
+  state: server = nil
+  state: config = nil
+  state: listenSocket = nil
+  state: connections = nil
+
+  initialize => self continueWith: #attach
+
+  attach =>
+    listener := (self.server childWithId: #listener) unwrap
+    self.connections := (self.parent childWithId: #connections) unwrap
+    self.listenSocket := (listener withTimeout: 15000) acceptorInfo: self.id
+    Erlang erlang send: self pid msg: #accept
+
+  handleInfo: msg =>
+    msg match: [
+      #accept -> self acceptOnce;   // accept, Connection start:, re-send #accept
+      _ -> nil
+    ]
+```
+
+**Child lookup (BT-3966).** By id, never by class (with 100 same-class
+children, `which:` answers `#ambiguous_child`):
+
+| Thousand Island | Catalina |
+|---|---|
+| `Server.listener_pid(server)` | `(server childWithId: #listener) unwrap` |
+| `Server.acceptor_pool_supervisor_pid(server)` | `(server childWithId: #acceptorPool) unwrap` |
+| `AcceptorSupervisor.connection_sup_pid(parent)` | `(parent childWithId: #connections) unwrap` |
+| `AcceptorPoolSupervisor.acceptor_supervisor_pids(pool)` | `pool children` (running children, declaration order) |
+| `DynamicSupervisor.which_children(conn_sup)` in `connection_pids/1` | `connSup children` (O(n) copy; bulk use only) |
+| `Supervisor.terminate_child(sup, :acceptor)` / `restart_child` | `sup terminateChild: #acceptor` / `sup restartChild: #acceptor` |
+
+`connectionPids` is `pool children flatMap: [:accSup | ((accSup
+childWithId: #connections) unwrap) children]`, run at human timescales as in
+Thousand Island.
+
+**OTP mapping** (from ADR 0135, for reading `server.ex` /
+`acceptor_*_supervisor.ex` side by side):
+
+| Thousand Island / OTP | Catalina |
+|---|---|
+| `Supervisor.start_link(Server, config)` | `ServerSupervisor spawnWith: config` |
+| `Supervisor.start_link(Server, config, name: n)` | `ServerSupervisor spawnWith: config as: #n` |
+| `init(arg)` | the configuration methods, reading `self args` |
+| `self()` in `init/1` | `self` in `childSpecs` |
+| `Supervisor.child_spec({Mod, arg}, id: id)` | `Mod supervisionSpec withId: id withArgs: arg` |
+| `Supervisor.init(children, strategy: :rest_for_one)` | `strategy => #restForOne`, `childSpecs => ...` |
+| `{DynamicSupervisor, max_children: n}` + handler child spec `shutdown:` | `ConnectionSupervisor` with `childClass`, `maxChildren`, `childShutdown` |
+| `which_children`, `terminate_child`, `restart_child` | `whichChildren` / `childWithId:`, `terminateChild:`, `restartChild:` |
+
+The rest of the phase:
+
 - `Listener`: opens `numListenSockets` sockets (sockets after the first bind to
   the actual port of the first, handling port 0); answers `listenerInfo` and
   `acceptorInfo: id` (round-robin socket `rem(id-1, n)+1`); closes sockets on
-  partial failure; `restart: #transient`.
-- `Acceptor`: looks up listener and sibling connection sup, loops
-  `transport accept:` → `Connection start:`. Error classification exactly as
-  `acceptor.ex`: `too_many_connections`/`spawn_error`/`controlling_process` →
-  event + loop; `econnaborted`/`einval` → event + loop; the transient list
-  (`enetdown`, `ehostunreach`, `etimedout`, ...) → `accept_error` + loop;
+  partial failure; `#transient`.
+- `Acceptor`: after `attach`, loops `transport accept:` → `Connection
+  start:`. Error classification exactly as `acceptor.ex`:
+  `too_many_connections`/`spawn_error`/`controlling_process` → event + loop;
+  `econnaborted`/`einval` → event + loop; the transient list (`enetdown`,
+  `ehostunreach`, `etimedout`, ...) → `accept_error` + loop;
   `emfile`/`enfile` → event + 100 ms sleep + loop; `closed` → exit normal;
   anything else → raise.
-- `Connection start:`: `startChild` with the handler's child spec
-  (`shutdown: shutdownTimeout`, `restart: #temporary`); on `max_children`
-  retry `maxConnectionsRetryCount` times with `maxConnectionsRetryWait`; then
+- `Connection start:`: `connections startChild: ...` (the
+  `ConnectionSupervisor`'s `childClass` is the handler, `#temporary`, and its
+  `childShutdown` is the server's `shutdownTimeout`); on `#max_children` retry
+  `maxConnectionsRetryCount` times with `maxConnectionsRetryWait`; then
   `controlling_process`; then send
   `{catalina_ready, RawSocket, HandlerConfig, AcceptorSpan, StartTime}`. On
-  `controlling_process` failure close the socket and `terminateChild`.
+  `controlling_process` failure close the socket and `terminateChild:`.
 - `ShutdownListener`: traps exits (by overriding `terminate:`), and on
-  shutdown calls `Listener stop` so acceptors drain.
+  shutdown stops the listener (`(server childWithId: #listener)`, looked up
+  in a `continueWith:` step like the acceptor) so acceptors drain.
 - `Catalina start:` facade (class-side; returns the `ServerSupervisor`
-  instance).
-- Tests use the `FlakyTransport` / `OwnershipErrorTransport` fakes from the
-  Elixir suite, written as Beamtalk classes implementing `Transport`.
+  instance from `spawnWith:`, or `spawnWith:as:` when a name is given).
+- Tests start one server per test with `spawnWith:` (not `supervise`), so
+  they need not be `serial`. They use the `FlakyTransport` /
+  `OwnershipErrorTransport` fakes from the Elixir suite, written as Beamtalk
+  classes implementing `Transport`.
 
 ### Phase 3: Handler (`handler_test`, 44 tests, the bulk of the work)
 
@@ -296,10 +470,12 @@ start-time-configured supervisors, `maxChildren`, per-child shutdown).
 
 ### Phase 6: Server operations and polish (`server_test`, 23 tests)
 
-- `suspend` (terminate each `acceptor` child, then `shutdown_listener`, then
-  `listener`), `resume` (reverse), `status` (`#suspended` when no listener),
-  `info`, `connectionPids`, `stop:` with wait. Needs BT-3966 (child control
-  by id).
+- `suspend` (`terminateChild: #acceptor` on each of `pool children`, then
+  `server terminateChild: #shutdownListener`, then `#listener`), `resume`
+  (`restartChild:` in reverse; `#child_running` counts as success, as
+  Thousand Island treats `:running`), `status` (`#suspended` when
+  `server childWithId: #listener` answers `ok: nil`), `info`,
+  `connectionPids`, `stop:` with wait. Needs BT-3966 (child control by id).
 - Draining: `shutdownTimeout` per handler child; `handleShutdown:` on
   `shutdown`; brutal kill on overrun.
 - `numListenSockets` > 1 with `reuseport`/`reuseport_lb`; Unix domain sockets
