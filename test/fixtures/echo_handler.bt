@@ -1,27 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// A stand-in for the `Echo` handlers in the Thousand Island tests until
-/// `Handler` arrives in Phase 3: it takes the socket from the ready message,
-/// arms `{active, once}` and echoes every packet back.
-Server subclass: EchoHandler
-  state: handlerOptions = nil
-  state: sock = nil
+/// The `Echo` handler of the Thousand Island tests: every packet goes back.
+Handler subclass: EchoHandler
 
-  handleInfo: msg =>
-    msg match: [
-      {#catalina_ready, raw, _config, _span, _start} -> self onReady: raw;
-      {#tcp, _s, data} -> self onData: data;
-      {#tcp_closed, _s} -> self stop;
-      _ -> nil
-    ]
-
-  onReady: raw =>
-    self.sock := raw
-    self arm
-
-  onData: data =>
-    TCPTransport send: self.sock data: data
-    self arm
-
-  arm => TCPTransport setopts: self.sock options: #({#active, #once})
+  handleData: data socket: sock state: st =>
+    sock send: data
+    HandlerResult continue: st

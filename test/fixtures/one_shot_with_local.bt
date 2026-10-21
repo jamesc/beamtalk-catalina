@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `OneShotTimeoutWithLocalMessages`: "start" sets a 50 ms one-shot
+/// timeout and starts a local message flood.
+RecordingHandler subclass: OneShotWithLocal
+
+  handleData: data socket: _sock state: st =>
+    (data startsWith: "start")
+      ifTrue: [
+        self scheduleLocal
+        HandlerResult continue: st timeout: 50
+      ]
+      ifFalse: [HandlerResult continue: st]
+
+  handleUserInfo: msg => msg =:= #localMessage ifTrue: [self scheduleLocal]
+
+  scheduleLocal =>
+    Erlang erlang
+      send_after: 10
+      dest: self pid
+      msg: #localMessage

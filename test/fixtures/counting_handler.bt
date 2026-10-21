@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A handler with its own sync and cast methods beside Catalina's
+/// callbacks, as a delegating Buccaneer handler has. It logs itself on
+/// connection so a test can reach it.
+RecordingHandler subclass: CountingHandler
+  state: packets = 0
+
+  handleConnection: _sock state: st =>
+    self note: {#handler, self}
+    HandlerResult continue: st
+
+  handleData: data socket: sock state: st =>
+    self.packets := self.packets + 1
+    sock send: data
+    HandlerResult continue: st
+
+  /// A sync method other processes may call.
+  packets => self.packets
+
+  /// A cast (`bump!`) that also changes state.
+  bump => self.packets := self.packets + 100
+
+  /// A sync method that writes to the socket from outside a callback.
+  greet: name => self socket send: "hi " ++ name

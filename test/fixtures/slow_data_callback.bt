@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `LongHandlerCallbacksDoNotAffectTimeout`: a slow `handleData:` does not
+/// eat into the read timeout, which starts when it returns.
+RecordingHandler subclass: SlowDataCallback
+
+  handleData: _data socket: _sock state: st =>
+    Timer sleep: 200
+    Erlang erlang
+      send_after: 50
+      dest: self pid
+      msg: #sendBytes
+    HandlerResult continue: st
+
+  handleUserInfo: msg => msg =:= #sendBytes ifTrue: [self socket send: "A"]

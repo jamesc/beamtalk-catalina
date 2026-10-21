@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `ReadTimeout`: floods itself with local messages every 10 ms, which
+/// must not reset the read timer.
+RecordingHandler subclass: LocalPingHandler
+
+  handleConnection: _sock state: st =>
+    self scheduleLocalPing
+    HandlerResult continue: st
+
+  handleData: _data socket: _sock state: st =>
+    self note: #ping
+    HandlerResult continue: st
+
+  handleUserInfo: msg => msg =:= #localPing ifTrue: [self scheduleLocalPing]
+
+  scheduleLocalPing =>
+    Erlang erlang
+      send_after: 10
+      dest: self pid
+      msg: #localPing

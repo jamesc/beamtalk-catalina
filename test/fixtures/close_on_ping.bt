@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleData.Closer`.
+RecordingHandler subclass: CloseOnPing
+
+  handleData: _data socket: _sock state: st => HandlerResult close: st

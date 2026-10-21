@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `PersistentTimeoutWithLocalMessages` (`startsWith:`, see
+/// `PersistentTimeoutData`): "start" sets a persistent 80 ms
+/// timeout; local messages keep arriving.
+RecordingHandler subclass: PersistentWithLocal
+
+  handleData: data socket: _sock state: st =>
+    self scheduleLocal
+    (data startsWith: "start") ifTrue: [
+      HandlerResult continue: st persistentTimeout: 80
+    ] ifFalse: [HandlerResult continue: st]
+
+  handleUserInfo: msg => msg =:= #localMessage ifTrue: [self scheduleLocal]
+
+  scheduleLocal =>
+    Erlang erlang
+      send_after: 10
+      dest: self pid
+      msg: #localMessage

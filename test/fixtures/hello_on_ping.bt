@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleData.HelloWorld`.
+RecordingHandler subclass: HelloOnPing
+
+  handleData: _data socket: sock state: st =>
+    sock send: "HELLO"
+    HandlerResult continue: st

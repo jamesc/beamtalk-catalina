@@ -1,0 +1,335 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Handler — the per-connection process: subclass it and override the
+/// callbacks you need, as with Thousand Island's `ThousandIsland.Handler`.
+///
+/// Lifecycle:
+///
+/// 1. The acceptor starts the handler and hands it the accepted socket with
+///    a ready message. The handler wraps it in a `Socket`, runs the
+///    transport's handshake and calls `handleConnection:state:`.
+/// 2. Each callback answers a `HandlerResult`. `continue:` arms the socket
+///    (`{active, once}`) and waits; data arrives in
+///    `handleData:socket:state:`. `close:` and `error:state:` end the
+///    connection.
+/// 3. Between callbacks the handler is an ordinary `Server`: other
+///    processes may call its methods, and messages that are not Catalina's
+///    go to `handleUserInfo:`.
+///
+/// State is the socket plus the user state, as Thousand Island's
+/// `{socket, state}`: the first user state is the server's `handlerOptions`,
+/// each callback gets it as `state:` and answers the next one inside its
+/// `HandlerResult`. Methods of a subclass may read `self socket` and
+/// `self userState`, and `handleUserInfo:` may set `self.userState`.
+///
+/// Callbacks (all optional):
+///
+/// | Thousand Island | Catalina | Default |
+/// |---|---|---|
+/// | `handle_connection(socket, state)` | `handleConnection: sock state: st` | `HandlerResult continue: st` |
+/// | `handle_data(data, socket, state)` | `handleData: data socket: sock state: st` | `HandlerResult continue: st` |
+/// | `handle_close(socket, state)` | `handleClose: sock state: st` | nothing |
+/// | `handle_error(reason, socket, state)` | `handleError: reason socket: sock state: st` | nothing |
+/// | `handle_shutdown(socket, state)` | `handleShutdown: sock state: st` | nothing |
+/// | `handle_timeout(socket, state)` | `handleTimeout: sock state: st` | nothing |
+/// | `handle_info(msg, {socket, state})` | `handleUserInfo: msg` | ignore |
+///
+/// How the connection ends decides which of the last four runs, from the
+/// exit reason, exactly as `handler.ex`'s `terminate/2`: a read timeout →
+/// `handleTimeout:`; the server shutting down → `handleShutdown:`; a peer
+/// close or `close:` → `handleClose:`; a handshake or upgrade failure,
+/// `error:state:`, a socket error or a raised error → `handleError:`. Then
+/// the socket is closed.
+///
+/// A callback that raises crashes the handler (ADR 0134), as in Elixir:
+/// `handleError:` runs with the error as the reason and the supervisor sees
+/// a crash. `error:state:` stops with the reason itself, also logged as a
+/// crash, unless the server's `silentTerminateOnError` is set.
+///
+/// The read timeout is lazy, as Thousand Island 1.6's: data only moves the
+/// deadline, and a single timer re-arms itself for the remainder when it
+/// fires early. Its messages carry a fresh ref, so a cancelled timer's late
+/// message is ignored without a mailbox flush. Time spent in a callback
+/// does not count against it (the deadline is set when the callback
+/// returns), but time in other messages does; `handleContinuation:` is the
+/// escape hatch for those.
+///
+/// ## Examples
+/// ```beamtalk
+/// Handler subclass: EchoHandler
+///   handleData: data socket: sock state: st =>
+///     sock send: data
+///     HandlerResult continue: st
+/// ```
+Server subclass: Handler
+  state: handlerOptions = nil
+  state: socket = nil
+  state: userState = nil
+  state: readTimer = nil
+  state: timerTag = nil
+  state: readDeadline = nil
+  state: timerDeadline = nil
+
+  /// Handlers are never restarted: a connection that ends is gone.
+  class supervisionPolicy => #temporary
+
+  initialize => self.userState := self.handlerOptions
+
+  // === Callbacks ===
+
+  /// The connection is ready (after the handshake).
+  handleConnection: _sock :: Socket state: st -> HandlerResult =>
+    HandlerResult continue: st
+
+  /// Data arrived on the socket.
+  handleData: _data :: Object socket: _sock :: Socket state: st -> HandlerResult =>
+    HandlerResult continue: st
+
+  /// The peer closed the connection, or a callback answered `close:`.
+  handleClose: _sock :: Socket state: _st => nil
+
+  /// The connection failed: `reason` is the transport's bare reason, the
+  /// `error:state:` reason, or `{exception, stacktrace}` for an error a
+  /// callback raised (Elixir's `{error, stacktrace}`).
+  handleError: _reason :: Object socket: _sock :: Socket state: _st => nil
+
+  /// The server is shutting down. The socket is still open.
+  handleShutdown: _sock :: Socket state: _st => nil
+
+  /// The read timeout expired. The socket is still open.
+  handleTimeout: _sock :: Socket state: _st => nil
+
+  /// A message that is not Catalina's. Ignored unless overridden.
+  handleUserInfo: _msg => nil
+
+  // === Accessors ===
+
+  /// The connection's `Socket` (nil until the ready message arrives).
+  socket => self.socket
+
+  /// The current user state.
+  userState => self.userState
+
+  /// The server's `handlerOptions`, the first user state.
+  handlerOptions => self.handlerOptions
+
+  // === Messages ===
+  sealed handleInfo: msg =>
+    msg match: [
+      {#catalina_ready, raw, config, span, start} -> self
+        onReady: raw
+        config: config
+        span: span
+        start: start;
+      {#tcp, raw, data} -> self
+        onData: data
+        from: raw
+        message: msg;
+      {#ssl, raw, data} -> self
+        onData: data
+        from: raw
+        message: msg;
+      {#tcp_closed, raw} -> self onClosed: raw message: msg;
+      {#ssl_closed, raw} -> self onClosed: raw message: msg;
+      {#tcp_error, raw, reason} -> self
+        onSocketError: reason
+        from: raw
+        message: msg;
+      {#ssl_error, raw, reason} -> self
+        onSocketError: reason
+        from: raw
+        message: msg;
+      {#catalina_read_timeout, tag} -> self onReadTimeout: tag;
+      _ -> self handleUserInfo: msg
+    ]
+
+  onReady: raw config: config :: HandlerConfig span: span start: _start =>
+    transport := config transport
+    peer := transport peername: raw
+    peer isError
+      ifTrue: [
+        // The client closed before we got here: nothing to do but close.
+        transport close: raw
+        ^self stopWith: {#shutdown, {#premature_conn_closing, peer error}}
+      ]
+    Erlang proc_lib set_label: {#catalina_connection, peer value}
+    self.socket := Socket
+      wrap: raw
+      peername: peer value
+      handlerConfig: config
+      span: span
+    shaken := self.socket handshake
+    shaken isError ifTrue: [
+      ^self stopWith: {#shutdown, {#handshake, shaken error}}
+    ]
+    self.socket := shaken value
+    // A continuation, so the socket is in state before the callback runs
+    // and a raise in it still closes the socket in `terminate:`.
+    self continueWith: #runHandleConnection
+
+  // Phase 5 wraps the two callback calls below in an inline `on:do:` that
+  // emits the span's `exception` event and re-raises (Thousand Island's
+  // `invoke_callback/2`). A block handed to a helper method could not
+  // keep the callback's field writes (ADR 0133), so it stays inline.
+  runHandleConnection =>
+    self handleContinuation: (self handleConnection: self.socket state: self.userState)
+
+  onData: data from: raw message: msg =>
+    raw =:= self.socket socket ifFalse: [^self handleUserInfo: msg]
+    self
+      handleContinuation: (self
+        handleData: data
+        socket: self.socket
+        state: self.userState)
+
+  onClosed: raw message: msg =>
+    raw =:= self.socket socket ifFalse: [^self handleUserInfo: msg]
+    self stopWith: {#shutdown, #peer_closed}
+
+  onSocketError: reason from: raw message: msg =>
+    raw =:= self.socket socket ifFalse: [^self handleUserInfo: msg]
+    self stopWith: reason
+
+  // === Continuations ===
+
+  /// Act on a callback's `HandlerResult`, as `handle_continuation/2`. A
+  /// subclass may call it from `handleUserInfo:` to re-arm the socket and
+  /// reset the read timeout, as Thousand Island's escape hatch.
+  handleContinuation: result :: HandlerResult =>
+    self.userState := result state
+    result kind match: [
+      #continue -> self continueReading: result;
+      #switchTransport -> self switchTransportWith: result;
+      #close -> self closeLocally;
+      #error -> self failWith: result reason;
+      _ -> Error signal: "Unknown HandlerResult kind: " ++ result kind printString
+    ]
+
+  continueReading: result :: HandlerResult =>
+    result persistent ifTrue: [
+      self.socket := self.socket withReadTimeout: result timeout
+    ]
+    self.socket setopts: #({#active, #once})
+    self armReadTimer: (result timeout ifNil: [self.socket readTimeout])
+    result then isNil ifFalse: [self continueWith: result then]
+
+  switchTransportWith: result :: HandlerResult =>
+    upgraded := self.socket upgrade: result transport options: result options
+    upgraded isError ifTrue: [
+      ^self stopWith: {#shutdown, {#upgrade, upgraded error}}
+    ]
+    self.socket := upgraded value
+    // Thousand Island passes an integer here on as a GenServer timeout;
+    // Catalina uses it as the read timeout, as `continue:timeout:` does.
+    self continueReading: result
+
+  closeLocally =>
+    self cancelReadTimer
+    self stopWith: {#shutdown, #local_closed}
+
+  failWith: reason =>
+    self cancelReadTimer
+    reason =:= #timeout ifTrue: [^self stopWith: {#shutdown, #read_timeout}]
+    self.socket silentTerminateOnError ifTrue: [
+      self stopWith: {#shutdown, {#silent_termination, reason}}
+    ] ifFalse: [self stopWith: reason]
+
+  // === Read timeout ===
+  armReadTimer: timeout =>
+    timeout =:= #infinity ifTrue: [^self cancelReadTimer]
+    now := self now
+    deadline := now + timeout
+    self.readTimer isNil ifTrue: [^self startTimer: timeout deadline: deadline]
+    self.timerDeadline <= deadline
+      ifTrue: [
+        // The running timer fires first and re-arms for what is left.
+        self.readDeadline := deadline
+      ]
+      ifFalse: [
+        self cancelReadTimer
+        self startTimer: timeout deadline: deadline
+      ]
+
+  startTimer: ms deadline: deadline =>
+    tag := Erlang erlang make_ref
+    self.timerTag := tag
+    self.readTimer := Erlang erlang
+      send_after: ms
+      dest: self pid
+      msg: {#catalina_read_timeout, tag}
+    self.readDeadline := deadline
+    self.timerDeadline := deadline
+
+  cancelReadTimer =>
+    self.readTimer isNil ifFalse: [Erlang erlang cancel_timer: self.readTimer]
+    self.readTimer := nil
+    self.timerTag := nil
+    self.readDeadline := nil
+    self.timerDeadline := nil
+
+  /// A timer fired. A stale one (cancelled, or replaced) is ignored; an
+  /// early one re-arms for the rest of the deadline.
+  onReadTimeout: tag =>
+    tag =:= self.timerTag ifFalse: [^nil]
+    self.readTimer := nil
+    self.timerTag := nil
+    now := self now
+    now >= self.readDeadline ifTrue: [
+      ^self stopWith: {#shutdown, #read_timeout}
+    ]
+    self startTimer: self.readDeadline - now deadline: self.readDeadline
+
+  now => Erlang erlang monotonic_time: #millisecond
+
+  // === Termination ===
+  terminate: reason =>
+    self.socket isNil ifTrue: [^nil]
+    reason match: [
+      {#shutdown, #read_timeout} -> self
+        endWith: #timeout
+        callback: #timeout
+        reason: nil;
+      #shutdown -> self
+        endWith: #shutdown
+        callback: #shutdown
+        reason: nil;
+      {#shutdown, {#handshake, r}} -> self
+        endWith: r
+        callback: #error
+        reason: r;
+      {#shutdown, {#silent_termination, r}} -> self
+        endWith: r
+        callback: #error
+        reason: r;
+      {#shutdown, {#upgrade, r}} -> self
+        endWith: r
+        callback: #error
+        reason: r;
+      {#shutdown, r} -> self
+        endWith: r
+        callback: #close
+        reason: nil;
+      _ -> self
+        endWith: reason
+        callback: #error
+        reason: reason
+    ]
+
+  /// Run the closing callback, then close the socket. The callback's answer
+  /// is ignored.
+  endWith: closeReason callback: which :: Symbol reason: reason =>
+    which match: [
+      #timeout -> self handleTimeout: self.socket state: self.userState;
+      #shutdown -> self handleShutdown: self.socket state: self.userState;
+      #close -> self handleClose: self.socket state: self.userState;
+      _ -> self
+        handleError: reason
+        socket: self.socket
+        state: self.userState
+    ]
+    self doSocketClose: closeReason
+
+  /// Close the socket. Phase 5 stops the connection span here with the
+  /// `getstat` counters and, unless `closeReason` is a clean one, the error.
+  doSocketClose: _closeReason => self.socket close

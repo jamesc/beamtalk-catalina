@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `TimeoutInitial`: a 50 ms timeout for the first data.
+RecordingHandler subclass: TimeoutInitial
+
+  handleConnection: _sock state: st => HandlerResult continue: st timeout: 50

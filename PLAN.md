@@ -102,7 +102,7 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 | `acceptor.ex` | 172 | `src/acceptor.bt` (Phase 2) — Server; parent lookups in a `continueWith:` step, then accept loop via self-message in `handleInfo:` | Beamtalk (needs BT-3966, BT-3968) |
 | `listener.ex` | 123 | `src/listener.bt` (Phase 2) — Actor owning the listen sockets | Beamtalk |
 | `connection.ex` | 106 | `src/connection.bt` (Phase 2) — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
-| `handler.ex` | 709 | `src/handler.bt` — abstract `Server` subclass; `src/handler_result.bt` | Beamtalk |
+| `handler.ex` | 709 | `src/handler.bt` — `Server` subclass; `src/handler_result.bt` (Phase 3) | Beamtalk |
 | `handler_config.ex` | 39 | `src/handler_config.bt` (Phase 1) | Beamtalk |
 | `server_config.ex` | 79 | `src/server_config.bt` (Phase 1) | Beamtalk |
 | `socket.ex` | 273 | `src/socket.bt` (Phase 1) | Beamtalk |
@@ -532,7 +532,67 @@ The rest of the phase:
   `OwnershipErrorTransport` fakes from the Elixir suite, written as Beamtalk
   classes implementing `Transport`.
 
-### Phase 3: Handler (`handler_test`, 44 tests, the bulk of the work)
+### Phase 3: Handler (`handler_test`, 44 tests, the bulk of the work) — done (BT-4036)
+
+`HandlerTest` has 36 tests: 34 of `handler_test.exs`'s 44 (some adapted, see
+below) and 2 additions (`handleShutdown:` when the server stops; a
+handler's own sync and cast methods beside its callbacks, which Buccaneer
+needs). 102 tests in all. Not ported here:
+
+- the 8 telemetry tests (10 cases, with the `:error`/`:throw`/`:exit`
+  expansion): Phase 5;
+- "it should allow upgrading the transport mid-connection" and "it should
+  allow calling handle_continue when upgrading": they need `SSLTransport`,
+  Phase 4.
+
+Adapted:
+
+- "complain loudly if a handle_info callback returns the wrong shaped
+  state" has nothing to test: the socket and the user state are separate
+  fields (`socket`, `userState`), not a tuple a callback could return
+  wrongly. It checks instead that a handler keeps serving after a user
+  message.
+- "it should handle upgrade errors" upgrades TCP to TCP (Thousand Island
+  upgrades SSL to TCP). It fails the same way, with `#unsupported_upgrade`.
+- The two GenServer `:timeout` tests: Beamtalk has no idle timeout, so the
+  handler sends itself bare `#timeout` and `#read_timeout`, which must not
+  count as the read timer.
+- Log assertions: fixtures (`RecordingHandler` subclasses) log events and
+  the exit reason to Ets. "terminating ** (stop) :nope" versus silent
+  becomes an exit reason of `#nope` versus `{shutdown, {silent_termination,
+  nope}}`.
+- Timing windows that bound "closes within" are wider than the Elixir
+  suite's, and fixtures match `startsWith:`, because on a loaded machine
+  two sends arrive as one packet.
+
+Deviations:
+
+- `handleInfo:` is `sealed` on `Handler`, and a subclass's own messages go
+  to `handleUserInfo:`. A `{tcp, S, _}` for another socket goes there too.
+  `handleContinuation: aResult` is the escape hatch (Thousand Island's
+  `Handler.handle_continuation/2` called from `handle_info`).
+- The read-timer state (`readTimer`, the ref tag, `readDeadline`,
+  `timerDeadline`) lives in the handler, not in `Socket`. Those three
+  `Socket` fields are gone; `Socket readTimeout` stays. The timer message
+  is `{#catalina_read_timeout, ref}`.
+- There is no `invokeCallback:` helper yet. A block handed to a helper
+  method could not keep the field writes the callback makes (ADR 0133), so
+  Phase 5 wraps the two callback calls in an inline `on:do:` that emits the
+  `exception` event and re-raises.
+- A raise in a callback crashes the handler (ADR 0134). `handleError:` then
+  gets `{exception, stacktrace}`, as Elixir's `{error, stacktrace}`.
+- `switchTransport:...timeout: ms` uses `ms` as the read timeout. Thousand
+  Island passes it on as a GenServer timeout, which looks like a slip.
+- `then: #selector` names a unary method of the handler, run through
+  `continueWith:`. The handler's internal method is `continueReading:`
+  because `continueWith:` is sealed on `Actor`.
+- The process label is `{catalina_connection, {ip, port}}` (`proc_lib:set_label/1`).
+- The Phase 2 stand-ins `EchoHandler` and `FailInitHandler` are now
+  `Handler` subclasses, and `ConnectionSupervisor` is
+  `DynamicSupervisor(Handler)`. `WaitingHandler` stays a raw `Server`,
+  because `connection_test.exs`'s handler is a raw GenServer.
+
+The plan as written:
 
 - `Handler`: abstract `Server` subclass. `initialize` traps exits, state is
   `{socket, userState}`.

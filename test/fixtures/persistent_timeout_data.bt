@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `PersistentTimeoutData`: "ping" makes 50 ms the read timeout from then on.
+/// (`startsWith:`: on a loaded machine "ping" and "pong" can arrive as one
+/// packet.)
+RecordingHandler subclass: PersistentTimeoutData
+
+  handleData: data socket: _sock state: st =>
+    (data startsWith: "ping") ifTrue: [
+      HandlerResult continue: st persistentTimeout: 50
+    ] ifFalse: [HandlerResult continue: st]

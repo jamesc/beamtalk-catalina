@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `SyncReadTimeout`: a blocking `recv` inside the callback times out
+/// after the read timeout, and the `#timeout` error is a read timeout.
+RecordingHandler subclass: SyncReadTimeout
+
+  handleData: _data socket: sock state: st =>
+    self note: #ping
+    received := sock recv: 0
+    received isError ifTrue: [
+      HandlerResult error: received error state: st
+    ] ifFalse: [HandlerResult continue: st]
