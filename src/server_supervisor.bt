@@ -34,10 +34,12 @@ typed Supervisor subclass: ServerSupervisor
 
   childSpecs -> List(SupervisionSpec) =>
     config := self config
-    #(((Listener supervisionSpec
+    #((Listener supervisionSpec
       withId: #listener
       withRestart: #transient
-      withArgs: #(config)) withClassMethod: #startFor:), (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool withArgs: #{
+      withArgs: #{
+        #config => config
+      }), (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool withArgs: #{
       #server => self,
       #config => config
     }), (ShutdownListener supervisionSpec

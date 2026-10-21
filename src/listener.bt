@@ -35,15 +35,6 @@ typed Actor subclass: Listener
 
   class supervisionPolicy -> RestartStrategy => #transient
 
-  /// The start function `ServerSupervisor` uses (`withClassMethod:`). The
-  /// supervisor runs it itself, and `spawnWith:` waits for `initialize`, so
-  /// a socket that cannot be opened fails the server's start, as
-  /// `{stop, Reason}` from Thousand Island's `init/1` does. A plain
-  /// `withArgs:` child's `initialize` runs only after its start has
-  /// returned, so its failure would not (BT-4033).
-  class startFor: config :: ServerConfig -> Listener =>
-    self spawnWith: #{#config => config}
-
   /// Which listen socket (1-based) acceptor `id` uses: `(id - 1) rem n + 1`,
   /// as Ranch and Thousand Island distribute them.
   class sealed socketIndexFor: id :: Integer count: n :: Integer -> Integer =>

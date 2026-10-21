@@ -25,10 +25,13 @@ TestCase subclass: ListenerTest
     ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
     result := Result
       tryDo: [
-        Listener startFor: (self config: #{
-          #port => port,
-          #transportOptions => #({#reuseaddr, false})
-        })
+        Listener
+          spawnWith: #{
+            #config => (self config: #{
+              #port => port,
+              #transportOptions => #({#reuseaddr, false})
+            })
+          }
       ]
     self assert: result isError
     // The transport's reason is in the instantiation error's hint.
@@ -37,17 +40,19 @@ TestCase subclass: ListenerTest
 
   testStartsWithOneSocketAndItsLocalInfo =>
     port := self freePort
-    listener := Listener startFor: (self configFor: port)
+    listener := Listener spawnWith: #{#config => (self configFor: port)}
     self assert: listener listenSockets size equals: 1
     self assert: listener listenerInfo equals: {{0, 0, 0, 0}, port}
     listener stop
 
   testListensUsingTheConfiguredTransport =>
     port := self freePort
-    listener := Listener startFor: (self config: #{
-      #port => port,
-      #transport => RecordingTransport
-    })
+    listener := Listener spawnWith: #{
+      #config => (self config: #{
+        #port => port,
+        #transport => RecordingTransport
+      })
+    }
     self assert: RecordingTransport lastPort equals: port
     listener stop
 
@@ -55,41 +60,40 @@ TestCase subclass: ListenerTest
     port := self freePort
     ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
     (Erlang gen_tcp) close: ls
-    listener := Listener startFor: (self configFor: port)
+    listener := Listener spawnWith: #{#config => (self configFor: port)}
     self assert: (TransportResult bare: ((Erlang gen_tcp) listen: port with: #())) error equals: #eaddrinuse
     listener stop
 
   testClosesItsSocketsWhenItStops =>
     port := self freePort
-    listener := Listener startFor: (self configFor: port)
+    listener := Listener spawnWith: #{#config => (self configFor: port)}
     socket := listener acceptorInfo: 1
     listener stop
     self assert: (TCPTransport sockname: socket) isError
 
   // ===== handle_call/3 =====
   testListenerInfoAnswersTheLocalInfo =>
-    listener := Listener startFor: (self configFor: 0)
+    listener := Listener spawnWith: #{#config => (self configFor: 0)}
     info := listener listenerInfo
     self assert: (info at: 1) equals: {0, 0, 0, 0}
     self assert: (info at: 2) > 0
     listener stop
 
   testAcceptorInfoAnswersTheListenSocket =>
-    listener := Listener startFor: (self configFor: 0)
+    listener := Listener spawnWith: #{#config => (self configFor: 0)}
     self assert: (listener acceptorInfo: 1) equals: listener listenSockets first
     listener stop
 
   // ===== multiple listen sockets =====
   testCreatesASingleSocketWhenNumListenSocketsIsOne =>
-    listener := Listener startFor: (self config: #{
-      #port => 0,
-      #numListenSockets => 1
-    })
+    listener := Listener spawnWith: #{
+      #config => (self config: #{#port => 0, #numListenSockets => 1})
+    }
     self assert: listener listenSockets size equals: 1
     listener stop
 
   testEveryAcceptorGetsTheOnlySocket =>
-    listener := Listener startFor: (self configFor: 0)
+    listener := Listener spawnWith: #{#config => (self configFor: 0)}
     socket := listener listenSockets first
     self assert: (listener acceptorInfo: 1) equals: socket
     self assert: (listener acceptorInfo: 2) equals: socket
