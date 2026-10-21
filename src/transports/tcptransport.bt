@@ -4,8 +4,9 @@
 /// TCPTransport — the clear-TCP `Transport`, over Erlang's `gen_tcp` and
 /// `inet`, as Thousand Island's `ThousandIsland.Transports.TCP`.
 ///
-/// Users mostly meet it through the `transportOptions` server option, a list
-/// of `gen_tcp` listen options. The most common is `ip`: `{127, 0, 0, 1}`,
+/// Users mostly meet it through the `transportOptions` server option: the
+/// `gen_tcp` listen options, as a Dictionary or a proplist (see
+/// `ServerConfig`). The most common is `ip`: `{127, 0, 0, 1}`,
 /// an IPv6 8-tuple, `#loopback`, `#any`, or `{#local, "/path/to.sock"}` for
 /// a Unix domain socket (with port 0). `TransportOptions` adds the required
 /// options and the defaults (`backlog 1024`, `nodelay true`,

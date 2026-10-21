@@ -177,6 +177,32 @@ TestCase subclass: SecureSocketTest
       }
     self assert: result isError
 
+  testServesTlsWithDictionaryTransportOptions =>
+    port := HandlerHarness
+      start: EchoHandler
+      options: #{
+        #transport => SSLTransport,
+        #transportOptions => #{
+          #certfile => "test/fixtures/cert.pem",
+          #keyfile => "test/fixtures/key.pem"
+        }
+      }
+      table: self tableName
+    client := self connect: port
+    self assert: (SSLTransport send: client data: "HELLO") isOk
+    self assert: (self recv: client) equals: "HELLO"
+
+  testFailsToStartWithoutACertificateInADictionary =>
+    result := Catalina
+      start: #{
+        #port => 0,
+        #handler => RecordingHandler,
+        #transport => SSLTransport,
+        #transportOptions => #{#keyfile => "test/fixtures/key.pem"}
+      }
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "certfile")
+
   testFailsToStartWithoutAKeyOrCertificate =>
     result := Catalina start: #{
       #port => 0,

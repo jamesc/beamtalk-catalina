@@ -915,6 +915,18 @@ it.
   handler's methods are its calls and casts. Forwarding unknown ones is
   `doesNotUnderstand:args:` (`@expect type`, as the stdlib's
   `TimeoutProxy`).
+- **Options as Dictionaries:** Thousand Island's `transport_options` and
+  `supervisor_options` are keyword lists, which a Beamtalk user would write
+  as a List of tuples. For consistency with the server options themselves,
+  `transportOptions` and `supervisorOptions` take a Dictionary
+  (`#{#reuseport => true}`), and a List stays as the raw-proplist escape
+  hatch. `ServerConfig fromOptions:` normalises once: `#key => value`
+  becomes `{key, value}`, and the atom-only listen options (`binary`,
+  `list`, `inet`, `inet6`, `local`, from OTP 27/28 `gen_tcp` and `ssl`)
+  become the bare atom for `true` and are left out for `false`. Any other
+  non-Symbol key raises, naming the option. The stored value is always a
+  proplist, so `Listener`, the transports and `Catalina` are unchanged.
+  `handlerOptions` stays any Object.
 - **No `v0.1.0` tag** until the release-readiness gate (BT-4051) and the
   user's go-ahead.
 

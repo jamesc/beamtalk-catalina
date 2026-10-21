@@ -28,6 +28,17 @@
 /// `ServerConfig.new/1` does. (`new:` is sealed on `Value`, so the
 /// validating constructor has its own name.)
 ///
+/// `transportOptions` and `supervisorOptions` take a Dictionary, such as
+/// `#{#reuseport => true, #certfile => "cert.pem"}`, or a List, which is
+/// passed through as a raw Erlang proplist. Thousand Island takes keyword
+/// lists here; Catalina prefers a Dictionary, as for its other options.
+/// `fromOptions:` turns a Dictionary into a proplist once, so the accessors
+/// always answer a List: `#key => value` becomes `{key, value}`. The
+/// atom-only listen options (`binary`, `list`, `inet`, `inet6` and `local`;
+/// see `atomOptions`) become the bare atom for `true` and are left out for
+/// `false`. A Dictionary has no order, so use a List when the order of the
+/// options matters.
+///
 /// ## Examples
 /// ```beamtalk
 /// config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
@@ -56,12 +67,13 @@ sealed typed Value subclass: ServerConfig
   field: silentTerminateOnError :: Boolean = false
 
   /// A validated configuration from a Dictionary of options. Raises on an
-  /// unknown option, a missing `handler`, more listen sockets than
-  /// acceptors, or several listen sockets without `reuseport` or
-  /// `reuseport_lb` in `transportOptions`.
+  /// unknown option, a missing `handler`, `transportOptions` or
+  /// `supervisorOptions` that are not a valid Dictionary or a List, more
+  /// listen sockets than acceptors, or several listen sockets without
+  /// `reuseport` or `reuseport_lb` in `transportOptions`.
   class sealed fromOptions: options :: Dictionary -> ServerConfig =>
     self validateKeys: options
-    config := self new: options
+    config := self new: (self normaliseOptions: options)
     self validateHandler: config
     self validateNumSockets: config
     self validateReuseport: config
@@ -84,6 +96,48 @@ sealed typed Value subclass: ServerConfig
         ]
       ]
     nil
+
+  /// The `gen_tcp` and `ssl` listen options that are a bare atom rather
+  /// than a `{key, value}` pair (OTP 27 and 28): the `list` or `binary`
+  /// mode, and the `inet`, `inet6` or `local` address family.
+  class sealed atomOptions -> List(Symbol) =>
+    #(#binary, #list, #inet, #inet6, #local)
+
+  /// `options` with `transportOptions` and `supervisorOptions` as proplists.
+  class sealed normaliseOptions: options :: Dictionary -> Dictionary =>
+    #(#transportOptions, #supervisorOptions)
+      inject: options
+      into: [:acc :name |
+        (options includesKey: name) ifTrue: [
+          acc at: name put: (self proplist: (options at: name) named: name)
+        ] ifFalse: [acc]
+      ]
+
+  class sealed proplist: value :: Object named: name :: Symbol -> List =>
+    (value isKindOf: List) ifTrue: [^value]
+    (value isKindOf: Dictionary)
+      ifFalse: [
+        Error signal: "{name} must be a Dictionary or a List, got: {value printString}"
+      ]
+    value keys
+      inject: #()
+      into: [:acc :key |
+        acc ++ (self
+          entry: key
+          value: (value at: key)
+          named: name)
+      ]
+
+  /// The proplist entries for one Dictionary entry: none, a bare atom, or
+  /// a `{key, value}` pair.
+  class sealed entry: key :: Object value: value :: Object named: name :: Symbol -> List =>
+    (key isKindOf: Symbol) ifFalse: [
+      Error signal: "{name} keys must be Symbols, got: {key printString}"
+    ]
+    (self atomOptions includes: key) ifFalse: [^#() add: {key, value}]
+    value =:= true ifTrue: [^#() add: key]
+    value =:= false ifTrue: [^#()]
+    Error signal: "{name} option {key printString} must be true or false, got: {value printString}"
 
   class sealed validateHandler: config :: ServerConfig -> Nil =>
     config handler isNil ifTrue: [

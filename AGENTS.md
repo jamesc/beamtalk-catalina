@@ -126,7 +126,10 @@ ported and every deviation. When behaviour is in doubt, Thousand Island's
 https://github.com/mtrudel/thousand_island/tree/1.6.0. Elixir names map to
 camelCase (`num_acceptors` → `numAcceptors`, `handle_data/3` →
 `handleData:socket:state:`), and `{:error, reason}` maps to `Result error:
-reason` with the bare reason.
+reason` with the bare reason. Keyword-list options (`transport_options`,
+`supervisor_options`) are Dictionaries, like Catalina's other options;
+`ServerConfig fromOptions:` turns them into proplists (a List is passed
+through), so code past `ServerConfig` only ever sees a proplist.
 
 ## Stable surface
 

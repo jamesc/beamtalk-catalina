@@ -116,6 +116,16 @@ TestCase subclass: ServerTest
     srv stop
     self assert: (ServerSupervisor named: #catalinaServerTestNamed) isError
 
+  testNamedServerFromADictionary =>
+    srv := self
+      start: #{
+        #handler => EchoHandler,
+        #numAcceptors => 1,
+        #supervisorOptions => #{#name => #catalinaServerTestNamedDict}
+      }
+    self assert: (ServerSupervisor named: #catalinaServerTestNamedDict) unwrap equals: srv
+    srv stop
+
   testInvalidOptionsAreAnError =>
     self assert: (Catalina start: #{#port => 0}) isError
 

@@ -62,6 +62,19 @@ TestCase subclass: SocketReuseTest
         listener stop
       ]
 
+  testDictionaryReuseportOpensSeveralListenSockets =>
+    listener := self
+      listenerFor: #{
+        #port => 0,
+        #numListenSockets => 2,
+        #transportOptions => #{#reuseport => true}
+      }
+    listener isNil
+      ifFalse: [
+        self assert: listener listenSockets size equals: 2
+        listener stop
+      ]
+
   testUnixDomainSocketsWithSeveralListenersFailCleanly =>
     path := File tempDirectory ++ "/catalina_uds_" ++ System uniqueId printString ++ ".sock"
     result := Result

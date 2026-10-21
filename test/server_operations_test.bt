@@ -278,6 +278,27 @@ TestCase subclass: ServerOperationsTest
     self send: "HI" to: client
     self assert: (self recv: client) equals: "HI"
 
+  testTcpDictionaryOptionsMatchTheProplist =>
+    port := self start: ReadOpt options: #{
+      #transportOptions => #{#send_timeout => 1230}
+    }
+    client := self connect: port
+    self send: "send_timeout" to: client
+    self assert: (self recv: client) equals: "ok"
+    self assert: (HandlerHarness await: {#opt, Result ok: #({#send_timeout, 1230})} in: self tableName)
+
+  testTcpDictionaryAtomOption =>
+    port := self start: EchoHandler options: #{
+      #transportOptions => #{#inet6 => true}
+    }
+    client := ((Erlang gen_tcp)
+      connect: {0, 0, 0, 0, 0, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+    self send: "HI" to: client
+    self assert: (self recv: client) equals: "HI"
+
   testTcpInetBackendOption =>
     port := self start: EchoHandler options: #{
       #transportOptions => #({#inet_backend, #socket})
