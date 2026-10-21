@@ -114,8 +114,10 @@ measure(Round, {Id, Kind, Params}, Impl, Peer, Opts, Raw) ->
     {ok, Port} = bench_peer:call(Peer, bench_node, start_server, [Server]),
     Metrics = try
         bench_load:wait_ready(Port, Tls, 120000),
-        run_row(Kind, Port, Peer, Params#{
-            warmup_ms => maps:get(warmup, Opts), duration_ms => maps:get(duration, Opts)})
+        bench_peer:call(Peer, bench_node, watch_start, [watched()]),
+        M0 = run_row(Kind, Port, Peer, Params#{
+            warmup_ms => maps:get(warmup, Opts), duration_ms => maps:get(duration, Opts)}),
+        maps:merge(M0, watched_metrics(bench_peer:call(Peer, bench_node, watch_stop, [])))
     after
         bench_peer:call(Peer, bench_node, stop_server, [5000])
     end,
@@ -164,6 +166,17 @@ settled_stats(Peer, Prev, Tries) ->
         false -> settled_stats(Peer, Now, Tries - 1)
     end.
 
+%% Node-wide processes every connection may touch: Beamtalk's trace store
+%% (BT-4066 monitors every actor through it). Their peak mailbox and
+%% reductions per second go in the raw results and the report.
+watched() -> [beamtalk_trace_store].
+
+watched_metrics(W) ->
+    maps:fold(fun(Name, #{peak_queue := Q, reductions := R, seconds := S}, Acc) ->
+        Acc#{list_to_atom(atom_to_list(Name) ++ "_peak_queue") => Q,
+             list_to_atom(atom_to_list(Name) ++ "_reductions_per_s") => R / max(S, 0.001)}
+    end, #{}, W).
+
 brief(echo, #{msgs_per_s := M, p50 := P50, p99 := P99, errors := E}) ->
     io_lib:format("~10.1f msg/s  p50 ~s  p99 ~s  errors ~p", [M, us(P50), us(P99), E]);
 brief(churn, #{msgs_per_s := M, p50 := P50, errors := E}) ->
@@ -203,7 +216,9 @@ metrics(echo) ->
     [{msgs_per_s, "msg/s", higher}, {bytes_per_s, "MB/s", higher},
      {p50, "p50 µs", lower}, {p99, "p99 µs", lower}, {p999, "p99.9 µs", lower}];
 metrics(churn) ->
-    [{msgs_per_s, "conn/s", higher}, {p50, "p50 µs", lower}, {p99, "p99 µs", lower}];
+    [{msgs_per_s, "conn/s", higher}, {p50, "p50 µs", lower}, {p99, "p99 µs", lower},
+     {beamtalk_trace_store_peak_queue, "trace store peak mailbox", lower},
+     {beamtalk_trace_store_reductions_per_s, "trace store reductions/s", lower}];
 metrics(idle) ->
     [{bytes_per_conn, "node bytes/conn", lower},
      {handler_bytes_per_conn, "handler bytes/conn", lower},
@@ -262,7 +277,7 @@ fmt(_, undefined) -> "-";
 fmt(bytes_per_s, V) -> io_lib:format("~.1f", [V / 1.0e6]);
 fmt(processes_per_conn, V) -> io_lib:format("~.2f", [V]);
 fmt(_, V) when V >= 100 -> integer_to_list(round(V));
-fmt(_, V) -> io_lib:format("~.1f", [V]).
+fmt(_, V) -> io_lib:format("~.1f", [float(V)]).
 
 all(Key, Vs) -> lists:join(", ", [fmt(Key, V) || V <- Vs]).
 

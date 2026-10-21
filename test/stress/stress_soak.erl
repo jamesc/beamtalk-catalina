@@ -31,14 +31,16 @@ soak(Ctx = #{soak_minutes := Minutes}) ->
             stress_lib:ready(TlsPort, #{tls => true}),
             Idle = bench_load:open_idle(Port, stress_lib:pick(Ctx, {200, 1000}), false),
             Load = start(Port, TlsPort),
+            stress_lib:node_call(Ctx, watch_start, [[beamtalk_trace_store]]),
             Samples = sample(Ctx, erlang:monotonic_time(millisecond) + Ms, Interval, []),
+            Watched = stress_lib:node_call(Ctx, watch_stop, []),
             Errors = stop(Load),
             bench_load:close_idle(Idle),
             stress_lib:node_call(Ctx, stop_server, [tls, 10000]),
             stress_lib:wait_until(fun() -> stress_lib:node_call(Ctx, connection_count, []) =:= 0 end,
                                   60000, connections_closed),
             After = stress_lib:settle(Ctx, ?KEYS),
-            judge(Base, After, Samples, Errors, Minutes)
+            (judge(Base, After, Samples, Errors, Minutes))#{watched => Watched}
         after
             stress_lib:node_call(Ctx, stop_server, [tls, 10000])
         end

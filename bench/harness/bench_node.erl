@@ -40,6 +40,8 @@
     kill_random_acceptor/0,
     kill_random_handler/0,
     gc_all/0,
+    watch_start/1,
+    watch_stop/0,
     cert_dir/0
 ]).
 
@@ -322,6 +324,59 @@ gc_all() ->
     [erlang:garbage_collect(P) || P <- erlang:processes()],
     ok.
 
+%% === Watching node-wide processes ===
+
+%% Sample the registered processes `Names` every 5 ms until `watch_stop/0`:
+%% peak message-queue length and reductions used. Names that are not
+%% registered (Thousand Island has no Beamtalk trace store) are skipped.
+watch_start(Names) ->
+    watch_stop(),
+    Pids = [{N, P} || N <- Names, P <- [whereis(N)], is_pid(P)],
+    Start = [{N, reds(P)} || {N, P} <- Pids],
+    W = spawn(fun() -> watch_loop(Pids, Start, #{}) end),
+    persistent_term:put({?MODULE, watcher}, W),
+    ok.
+
+%% Answers #{Name => #{peak_queue, reductions, seconds}}.
+watch_stop() ->
+    case persistent_term:get({?MODULE, watcher}, undefined) of
+        undefined -> #{};
+        W ->
+            persistent_term:erase({?MODULE, watcher}),
+            Ref = make_ref(),
+            W ! {stop, self(), Ref},
+            receive {Ref, R} -> R after 5000 -> #{} end
+    end.
+
+watch_loop(Pids, Start, Peaks) ->
+    T0 = erlang:monotonic_time(millisecond),
+    watch_loop(Pids, Start, Peaks, T0).
+
+watch_loop(Pids, Start, Peaks, T0) ->
+    receive
+        {stop, From, Ref} ->
+            Secs = (erlang:monotonic_time(millisecond) - T0) / 1000,
+            From ! {Ref, maps:from_list([{N, #{peak_queue => maps:get(N, Peaks, 0),
+                                              reductions => reds(P) - proplists:get_value(N, Start),
+                                              seconds => Secs}}
+                                         || {N, P} <- Pids])}
+    after 5 ->
+        Peaks1 = lists:foldl(fun({N, P}, Acc) ->
+            Q = case erlang:process_info(P, message_queue_len) of
+                {message_queue_len, L} -> L;
+                _ -> 0
+            end,
+            maps:update_with(N, fun(X) -> max(X, Q) end, Q, Acc)
+        end, Peaks, Pids),
+        watch_loop(Pids, Start, Peaks1, T0)
+    end.
+
+reds(P) ->
+    case erlang:process_info(P, reductions) of
+        {reductions, R} -> R;
+        _ -> 0
+    end.
+
 %% Node-wide counters for the leak checks and the memory rows.
 stats() ->
     #{
@@ -334,5 +389,13 @@ stats() ->
         memory => erlang:memory(total),
         process_memory => erlang:memory(processes),
         binary_memory => erlang:memory(binary),
-        connections => try connection_count() catch _:_ -> 0 end
+        connections => try connection_count() catch _:_ -> 0 end,
+        trace_store_queue => case whereis(beamtalk_trace_store) of
+            undefined -> 0;
+            TS -> element(2, erlang:process_info(TS, message_queue_len))
+        end,
+        trace_store_reductions => case whereis(beamtalk_trace_store) of
+            undefined -> 0;
+            TS2 -> reds(TS2)
+        end
     }.
