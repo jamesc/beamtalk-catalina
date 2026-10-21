@@ -338,3 +338,20 @@ TestCase subclass: TelemetryTest
     Timer sleep: 300
     self assert: (self count: #connection named: #start) equals: 1
     self assert: (self count: #connection named: #stop) equals: 1
+
+  // ===== CatalinaLogger =====
+
+  testLoggerAttachesCumulativelyAndDetaches =>
+    self assert: (CatalinaLogger attach: #debug) isOk
+    // #debug attached #error, #info and #debug, but not #trace.
+    self assert: (CatalinaLogger attach: #debug) error kind equals: #handler_exists
+    self assert: (CatalinaLogger attach: #info) error kind equals: #handler_exists
+    self assert: (CatalinaLogger attach: #trace) isOk
+    // A server runs with the logger attached.
+    port := self start: BlockingEcho
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "HI"
+    self assert: (self recv: client) equals: "HI"
+    self assert: (CatalinaLogger detach: #error) equals: nil
+    self assert: (CatalinaLogger attach: #error) isOk
+    CatalinaLogger detach: #error
