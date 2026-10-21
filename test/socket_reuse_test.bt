@@ -11,7 +11,9 @@ TestCase subclass: SocketReuseTest
 
   /// A started listener, or nil where reuseport is unsupported.
   listenerFor: options :: Dictionary -> Listener | Nil =>
-    started := Result tryDo: [Listener startFor: (self config: options)]
+    started := Result tryDo: [
+      Listener spawnWith: #{#config => (self config: options)}
+    ]
     started isOk
       ifTrue: [started value]
       ifFalse: [
@@ -65,12 +67,12 @@ TestCase subclass: SocketReuseTest
     result := Result
       tryDo: [
         Listener
-          startFor: (self
-            config: #{
-              #port => 0,
-              #numListenSockets => 2,
-              #transportOptions => #({#ip, {#local, path}}, {#reuseport, true})
-            })
+          spawnWith: #{#config => (self
+              config: #{
+                #port => 0,
+                #numListenSockets => 2,
+                #transportOptions => #({#ip, {#local, path}}, {#reuseport, true})
+              })}
       ]
     self assert: result isError
     self assert: (result error printString includesSubstring: "eaddrinuse")

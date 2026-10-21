@@ -329,13 +329,15 @@ one leaves the other serving), named servers, start errors, and acceptors
 ending normally when the listener stops. The tree, the hang rule and the
 child lookups are as designed below. Deviations:
 
-- **The listener starts through `withClassMethod: #startFor:`, not
-  `withArgs:`.** A plain static actor child runs `initialize` after its
-  start has returned, so a listener that cannot bind (`eaddrinuse`) would
-  not fail the server's start. It would crash-loop until the server gave
-  up, while `Catalina start:` had already answered `ok:`. A `withClassMethod:`
-  factory runs in the supervisor and `spawnWith:` waits for `initialize`,
-  which gives Thousand Island's `{:stop, reason}` from `init/1` (BT-4033).
+- The listener first started through `withClassMethod: #startFor:`.
+  Before BT-4033, a plain static actor child ran `initialize` after its
+  start had returned, so a listener that could not bind (`eaddrinuse`) did
+  not fail the server's start: it crash-looped while `Catalina start:` had
+  already answered `ok:`. BT-4033 makes supervised children wait for
+  `initialize`, so the listener is a plain `supervisionSpec withArgs:` child
+  again, and a bind failure fails `Catalina start:` with
+  `#supervisor_start_failed` (`eaddrinuse` in the hint), as Thousand
+  Island's `{:stop, reason}` from `init/1` does.
 - `Catalina start:` answers a `Result` (`ok:` the `ServerSupervisor`).
   `listenerInfo` and `connectionPids` are instance methods on
   `ServerSupervisor` (`srv listenerInfo`), and `connectionPids` answers the
@@ -469,9 +471,8 @@ gives it the `ServerSupervisor`, replacing Thousand Island's
 `{server_pid, self(), acceptor_id, config}`. The rule (ADR 0135): **never
 synchronously call a supervisor from code that supervisor is waiting on.** A
 supervisor waits on its own and its nested supervisors' configuration
-methods, and on the `initialize` of `withName:` / `withClassMethod:` actor
-children, during the initial start, every OTP restart and every
-`startChild:`. So:
+methods, and (since BT-4033) on the `initialize` of every actor child,
+during the initial start, every OTP restart and every `startChild:`. So:
 
 - No parent or server calls from any `childSpecs` / `childClass` / ...
   method, and the acceptor is not a `withName:` child.
