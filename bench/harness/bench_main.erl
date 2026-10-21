@@ -100,7 +100,7 @@ run(Opts = #{rounds := Rounds, out := Out}) ->
               "\nLoad average (1, 5, 15 min) at the start of each round:\n\n",
               [io_lib:format("- round ~p: ~s~n", [R, L]) || {R, L, _} <- PerRound]],
     ReportFile = filename:join(Out, "report-" ++ Tag ++ ".md"),
-    ok = file:write_file(ReportFile, Report),
+    ok = file:write_file(ReportFile, unicode:characters_to_binary(Report)),
     io:put_chars(Report),
     log("~nraw: ~s~nreport: ~s~n", [RawFile, ReportFile]),
     ok.
