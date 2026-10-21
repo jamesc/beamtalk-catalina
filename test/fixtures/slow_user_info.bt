@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `LongGenServerCallbacksDoAffectTimeout`: time in a slow non-Catalina
+/// message does count against the read timeout.
+RecordingHandler subclass: SlowUserInfo
+
+  handleConnection: _sock state: st =>
+    Erlang erlang send: self pid msg: #sleepThenSend
+    HandlerResult continue: st
+
+  handleUserInfo: msg =>
+    msg match: [
+      #sleepThenSend -> self sleepThenSend;
+      #sendBytes -> self socket send: "A";
+      _ -> nil
+    ]
+
+  sleepThenSend =>
+    Timer sleep: 75
+    Erlang erlang
+      send_after: 50
+      dest: self pid
+      msg: #sendBytes

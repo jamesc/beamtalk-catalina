@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `TimeoutData`: a 50 ms timeout after "ping".
+RecordingHandler subclass: TimeoutData
+
+  handleData: _data socket: _sock state: st =>
+    HandlerResult continue: st timeout: 50

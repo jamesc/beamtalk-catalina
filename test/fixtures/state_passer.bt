@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `StatePasser`: closes on "ping"; `handleClose:` records the state.
+RecordingHandler subclass: StatePasser
+
+  handleData: data socket: _sock state: st =>
+    data =:= "ping" ifTrue: [
+      HandlerResult close: st
+    ] ifFalse: [HandlerResult continue: st]

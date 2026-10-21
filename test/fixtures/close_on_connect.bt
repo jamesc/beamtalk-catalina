@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleConnection.Closer`.
+RecordingHandler subclass: CloseOnConnect
+
+  handleConnection: _sock state: st => HandlerResult close: st

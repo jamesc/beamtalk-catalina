@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `EchoWithTimeout`.
+RecordingHandler subclass: EchoWithTimeout
+
+  handleData: data socket: sock state: st =>
+    sock send: data
+    HandlerResult continue: st

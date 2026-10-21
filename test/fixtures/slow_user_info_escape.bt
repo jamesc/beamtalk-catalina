@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `LongGenServerCallbacksHaveAContinuationEscapeHatch`: a slow message
+/// handler resets the read timeout with `handleContinuation:`.
+RecordingHandler subclass: SlowUserInfoEscape
+
+  handleConnection: _sock state: st =>
+    Erlang erlang send: self pid msg: #sleepThenSend
+    HandlerResult continue: st
+
+  handleUserInfo: msg =>
+    msg match: [
+      #sleepThenSend -> self sleepThenSend;
+      #sendBytes -> self socket send: "A";
+      _ -> nil
+    ]
+
+  sleepThenSend =>
+    Timer sleep: 150
+    Erlang erlang
+      send_after: 50
+      dest: self pid
+      msg: #sendBytes
+    self handleContinuation: (HandlerResult continue: self userState)

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleConnection.UpgradeError`: TCP cannot be upgraded, so the
+/// upgrade fails and `handleError:` gets `#unsupported_upgrade`.
+RecordingHandler subclass: UpgradeError
+
+  handleConnection: sock state: st =>
+    sock send: "HELLO"
+    HandlerResult
+      switchTransport: TCPTransport
+      options: #()
+      state: st

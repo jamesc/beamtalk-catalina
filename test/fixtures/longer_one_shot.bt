@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `LongerOneShotTimeout`: "ping" sets a 400 ms one-shot timeout.
+RecordingHandler subclass: LongerOneShot
+
+  handleData: _data socket: _sock state: st =>
+    HandlerResult continue: st timeout: 400

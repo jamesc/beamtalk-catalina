@@ -1,0 +1,406 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `handler_test.exs`. The Elixir handlers log
+/// from their callbacks and the tests capture the log; the fixtures here
+/// (`RecordingHandler` subclasses) append to a log in an Ets table instead,
+/// including the exit reason, which stands in for the presence or absence of
+/// a crash report. Telemetry cases are ported in Phase 5, the SSL upgrade
+/// cases in Phase 4.
+TestCase subclass: HandlerTest
+
+  tableName -> Symbol => #catalinaHandlerTest
+
+  setUp =>
+    Ets new: self tableName type: #set
+    self
+
+  tearDown =>
+    table := Ets named: self tableName
+    (table at: #servers ifAbsent: [
+      #()
+    ]) do: [:srv | srv isAlive ifTrue: [srv stop]]
+    table delete
+
+  /// Start a one-acceptor server for `handler` and answer its port.
+  start: handler -> Integer => self start: handler options: #{}
+
+  start: handler options: options :: Dictionary -> Integer =>
+    all := ((options at: #port put: 0) at: #handler put: handler) at: #numAcceptors put: 1
+    all := all at: #handlerOptions put: ((all at: #handlerOptions ifAbsent: [
+      #{}
+    ]) at: #table put: self tableName)
+    srv := (Catalina start: all) unwrap
+    // Kept for tearDown: a TestCase is a Value, so a helper cannot set a field.
+    table := Ets named: self tableName
+    table at: #servers put: ((table at: #servers ifAbsent: [#()]) add: srv)
+    srv listenerInfo unwrap at: 2
+
+  /// The server the test started last.
+  server => ((Ets named: self tableName) at: #servers) last
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  send: data :: String to: client :: Object =>
+    (Erlang gen_tcp) send: client with: data
+
+  /// The next data on `client` within `ms`, or the bare error.
+  recv: client :: Object within: ms :: Integer -> Object =>
+    result := TCPTransport
+      recv: client
+      length: 0
+      timeout: ms
+    result isOk ifTrue: [result value] ifFalse: [result error]
+
+  // Generous, as the machine may be loaded; it only waits when nothing comes.
+  recv: client :: Object -> Object => self recv: client within: 3000
+
+  log -> List => (Ets named: self tableName) at: #log ifAbsent: [#()]
+
+  /// Wait up to three seconds for `event` to be logged.
+  awaitLogged: event -> Boolean =>
+    300 timesRepeat: [(self log includes: event) ifFalse: [Timer sleep: 10]]
+    self log includes: event
+
+  /// The logged exit reason, waiting up to three seconds for it.
+  exitReason -> Object =>
+    300 timesRepeat: [(self exitEntry) isNil ifTrue: [Timer sleep: 10]]
+    entry := self exitEntry
+    entry isNil ifTrue: [nil] ifFalse: [entry at: 2]
+
+  handlerEntry =>
+    self log detect: [:e |
+      (e isKindOf: Tuple) and: [(e at: 1) =:= #handler]
+    ] ifNone: [nil]
+
+  exitEntry =>
+    self log detect: [:e |
+      (e isKindOf: Tuple) and: [(e at: 1) =:= #exit]
+    ] ifNone: [nil]
+
+  // ===== state passing =====
+  testTakesHandlerOptionsAsInitialStateAndPreservesIt =>
+    port := self start: StatePasser options: #{
+      #handlerOptions => #{#greeting => #hello}
+    }
+    client := self connect: port
+    self send: "ping" to: client
+    (Erlang gen_tcp) close: client
+    self assert: (self awaitLogged: {#close, #{
+      #greeting => #hello,
+      #table => self tableName
+    }})
+
+  testHandlerStateHasNoShapeToGetWrong =>
+    // "it should complain loudly if a handle_info callback returns the wrong
+    // shaped state": a Beamtalk handler keeps the socket and the user state
+    // in separate fields, so a `handleUserInfo:` cannot drop the socket.
+    // The handler still serves data after a user message.
+    port := self start: FakeProxy
+    client := self connect: port
+    self assert: (self recv: client) equals: "Got other data"
+    self assert: (self recv: client within: 100) equals: #timeout
+
+  testTcpMessagesFromOtherSocketsReachHandleUserInfo =>
+    port := self start: FakeProxy
+    client := self connect: port
+    self assert: (self recv: client) equals: "Got other data"
+
+  // ===== handle_connection =====
+  testConnectionStaysOpenOnContinue =>
+    port := self start: HelloOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self recv: client within: 100) equals: #timeout
+
+  testConnectionClosesOnClose =>
+    port := self start: CloseOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+
+  testConnectionClosesAndCallsHandleErrorOnError =>
+    port := self start: ErrorOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: {#error, #nope})
+    // Not silent: the handler exits with the reason itself, a crash.
+    self assert: self exitReason equals: #nope
+
+  testConnectionTerminatesSilentlyOnErrorWhenConfigured =>
+    port := self start: ErrorOnConnect options: #{
+      #silentTerminateOnError => true
+    }
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: {#error, #nope})
+    // A {shutdown, _} reason is a clean exit: no crash report.
+    self assert: self exitReason equals: {#shutdown, {#silent_termination, #nope}}
+
+  testConnectionClosesAndCallsHandleErrorWhenARaise =>
+    port := self start: RaiseOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitRaised: "nope")
+
+  testRaiseIsNotSilentEvenWhenConfigured =>
+    port := self start: RaiseOnConnect options: #{
+      #silentTerminateOnError => true
+    }
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitRaised: "nope")
+    self deny: (self isShutdown: self exitReason)
+
+  isShutdown: reason -> Boolean =>
+    (reason isKindOf: Tuple) and: [(reason at: 1) =:= #shutdown]
+
+  /// Wait for `handleError:` to get the raised error with `message`.
+  awaitRaised: message :: String -> Boolean =>
+    300 timesRepeat: [(self raisedWith: message) ifFalse: [Timer sleep: 10]]
+    self raisedWith: message
+
+  raisedWith: message :: String -> Boolean =>
+    self log
+      anySatisfy: [:e |
+        ((e isKindOf: Tuple) and: [
+          (e at: 1) =:= #error
+        ]) and: [(e at: 2) printString includesSubstring: message]
+      ]
+
+  // ===== upgrade =====
+  testUpgradeErrorsCallHandleError =>
+    // `handle_connection` switches to a transport that cannot upgrade. The
+    // Elixir test upgrades SSL to TCP; TCP to TCP fails the same way.
+    port := self start: UpgradeError
+    client := self connect: port
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self awaitLogged: {#error, #unsupported_upgrade})
+    self assert: (self recv: client) equals: #closed
+
+  // ===== handle_data =====
+  testDataKeepsConnectionOpenOnContinue =>
+    port := self start: HelloOnPing
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self recv: client within: 100) equals: #timeout
+
+  testDataClosesConnectionOnClose =>
+    port := self start: CloseOnPing
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+
+  testDataClosesAndCallsHandleErrorOnError =>
+    port := self start: ErrorOnPing
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: {#error, #nope})
+
+  testDataClosesAndCallsHandleErrorWhenARaise =>
+    port := self start: RaiseOnPing
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitRaised: "nope")
+
+  // ===== async waiting =====
+  testTimesOutWaitingForInitialData =>
+    port := self start: TimeoutInitial
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testTimesOutWaitingForData =>
+    port := self start: TimeoutData
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testGlobalReadTimeoutFiresDespiteLocalMessages =>
+    port := self start: LocalPingHandler options: #{#readTimeout => 50}
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #ping)
+    self assert: (self awaitLogged: #timeout)
+
+  testClientSendingWithinReadTimeoutKeepsConnectionOpen =>
+    port := self start: LocalPingHandler options: #{#readTimeout => 100}
+    client := self connect: port
+    6
+      timesRepeat: [
+        self send: "ping" to: client
+        Timer sleep: 50
+      ]
+    self assert: (self recv: client within: 10) equals: #timeout
+    self deny: (self log includes: #timeout)
+
+  testSyncRecvTimesOutAfterReadTimeout =>
+    port := self start: SyncReadTimeout options: #{#readTimeout => 50}
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #ping)
+    self assert: (self awaitLogged: #timeout)
+
+  testCallbackTimeoutOverridesGlobalReadTimeout =>
+    port := self start: TimeoutData options: #{#readTimeout => 5000}
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client within: 2000) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testPersistentTimeoutBecomesTheReadTimeout =>
+    port := self start: PersistentTimeoutData options: #{#readTimeout => 5000}
+    client := self connect: port
+    self send: "ping" to: client
+    Timer sleep: 100
+    // Already closed by the 50 ms timeout; the "pong" round would use it too.
+    self send: "pong" to: client
+    self assert: (self recv: client within: 2000) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testCallsTheContinuationSelector =>
+    port := self start: ContinueData
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #continued)
+
+  testStrayTimeoutMessagesDoNotTriggerHandleTimeout =>
+    port := self start: StrayTimeoutHandler options: #{#readTimeout => 5000}
+    client := self connect: port
+    Timer sleep: 200
+    self assert: (self recv: client within: 50) equals: #timeout
+    self deny: (self log includes: #timeout)
+
+  testStillTimesOutWhileTheServerIsSending =>
+    port := self start: SendWhileReading options: #{#readTimeout => 500}
+    client := self connect: port
+    received := 0
+    done := false
+    [done]
+      whileFalse: [
+        chunk := TCPTransport
+          recv: client
+          length: 0
+          timeout: 1000
+        chunk isOk ifTrue: [
+          received := received + chunk value size
+        ] ifFalse: [done := true]
+      ]
+    // About one byte per millisecond until the 500 ms read timeout closes
+    // the connection (fewer on a loaded machine): the sends did not keep
+    // it open.
+    self assert: (received between: 1 and: 1000)
+
+  testTimeInDataCallbacksDoesNotCountAgainstTheTimeout =>
+    port := self start: SlowDataCallback options: #{#readTimeout => 100}
+    client := self connect: port
+    self send: "A" to: client
+    self assert: (self recv: client) equals: "A"
+
+  testTimeInOtherMessagesDoesCountAgainstTheTimeout =>
+    port := self start: SlowUserInfo options: #{#readTimeout => 100}
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+
+  testHandleContinuationIsAnEscapeHatch =>
+    port := self start: SlowUserInfoEscape options: #{#readTimeout => 100}
+    client := self connect: port
+    self assert: (self recv: client) equals: "A"
+    self assert: (self recv: client) equals: #closed
+
+  testTimerResetsFromTheLastClientMessage =>
+    port := self start: EchoWithTimeout options: #{#readTimeout => 100}
+    client := self connect: port
+    4
+      timesRepeat: [
+        self send: "ping" to: client
+        self assert: (self recv: client) equals: "ping"
+        Timer sleep: 80
+      ]
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testOneShotTimeoutIgnoresLocalMessages =>
+    port := self start: OneShotWithLocal options: #{#readTimeout => 5000}
+    client := self connect: port
+    self send: "start" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testPersistentTimeoutSpansDataRounds =>
+    port := self start: PersistentWithLocal options: #{#readTimeout => 5000}
+    client := self connect: port
+    self send: "start" to: client
+    Timer sleep: 40
+    self send: "ping" to: client
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testALongerOneShotTimeoutIsHonouredInFull =>
+    port := self start: LongerOneShot options: #{#readTimeout => 100}
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client within: 250) equals: #timeout
+    self assert: (self recv: client) equals: #closed
+    self assert: (self awaitLogged: #timeout)
+
+  testAnInfinityOneShotTimeoutDisablesTheReadTimeout =>
+    port := self start: InfinityOneShot options: #{#readTimeout => 100}
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client within: 400) equals: #timeout
+    (Erlang gen_tcp) close: client
+    Timer sleep: 50
+    self deny: (self log includes: #timeout)
+
+  testABareReadTimeoutMessageDoesNotTriggerHandleTimeout =>
+    // Thousand Island's second GenServer `:timeout` test; here the stray
+    // bare `#read_timeout` (the old timer message) is the case that matters.
+    port := self start: StrayTimeoutHandler options: #{#readTimeout => 5000}
+    client := self connect: port
+    Timer sleep: 100
+    self assert: (self recv: client within: 50) equals: #timeout
+    self deny: (self log includes: #timeout)
+
+  testCallsHandleCloseWhenTheClientCloses =>
+    port := self start: RecordingHandler
+    client := self connect: port
+    (Erlang gen_tcp) close: client
+    self assert: (self awaitLogged: {#close, #{#table => self tableName}})
+
+  // ===== Catalina additions =====
+  testCallsHandleShutdownWhenTheServerStops =>
+    port := self start: HelloOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: "HELLO"
+    self server stop
+    self assert: (self awaitLogged: #shutdown)
+    self assert: (self recv: client) equals: #closed
+
+  testUserSyncAndCastMethodsCoexistWithCallbacks =>
+    port := self start: CountingHandler
+    client := self connect: port
+    300 timesRepeat: [(self handlerEntry) isNil ifTrue: [Timer sleep: 10]]
+    handler := self handlerEntry at: 2
+    self send: "one" to: client
+    self assert: (self recv: client) equals: "one"
+    self assert: handler packets equals: 1
+    handler bump!
+    handler greet: "there"
+    self assert: (self recv: client) equals: "hi there"
+    self assert: handler packets equals: 101
+    // Callbacks still run after the user's own messages.
+    self send: "two" to: client
+    self assert: (self recv: client) equals: "two"
+    self assert: handler packets equals: 102

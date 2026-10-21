@@ -34,9 +34,6 @@ sealed Value subclass: Socket
   field: peername = nil
   field: silentTerminateOnError = false
   field: span = nil
-  field: readTimer = nil
-  field: readDeadline = nil
-  field: timerDeadline = nil
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
@@ -51,9 +48,6 @@ sealed Value subclass: Socket
       peername: peer
       silentTerminateOnError: handlerConfig silentTerminateOnError
       span: span
-      readTimer: nil
-      readDeadline: nil
-      timerDeadline: nil
 
   /// Run the transport's handshake, bounded by `handshakeTimeout` when the
   /// transport answers `handshake:timeout:`, and answer the Socket over the

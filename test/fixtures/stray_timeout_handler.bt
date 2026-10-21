@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `GenServerIdleTimeout`, adapted: Beamtalk has no GenServer idle
+/// timeout, so it sends itself the bare `#timeout` and `#read_timeout`
+/// messages that once meant one. Neither may be taken for the read timer.
+RecordingHandler subclass: StrayTimeoutHandler
+
+  handleConnection: _sock state: st =>
+    Erlang erlang send: self pid msg: #timeout
+    Erlang erlang send: self pid msg: #read_timeout
+    HandlerResult continue: st

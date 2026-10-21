@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleData.Exploding`.
+RecordingHandler subclass: RaiseOnPing
+
+  handleData: _data socket: _sock state: _st => Error signal: "nope"

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `SendDoesNotAffectTimeout`: sends a byte every millisecond; sending
+/// must not reset the read timer.
+RecordingHandler subclass: SendWhileReading
+
+  handleConnection: _sock state: st =>
+    Erlang erlang
+      send_after: 1
+      dest: self pid
+      msg: #sendBytes
+    HandlerResult continue: st
+
+  handleUserInfo: msg =>
+    msg =:= #sendBytes
+      ifTrue: [
+        self socket send: "A"
+        Erlang erlang
+          send_after: 1
+          dest: self pid
+          msg: #sendBytes
+      ]

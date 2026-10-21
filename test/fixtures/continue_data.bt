@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `ContinueData`: "ping" asks for `keepGoing` to run next, which stops.
+RecordingHandler subclass: ContinueData
+
+  handleData: _data socket: _sock state: st =>
+    HandlerResult continue: st then: #keepGoing
+
+  keepGoing =>
+    self note: #continued
+    self stop

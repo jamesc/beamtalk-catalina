@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleConnection.HelloWorld`: sends HELLO and keeps the connection.
+RecordingHandler subclass: HelloOnConnect
+
+  handleConnection: sock state: st =>
+    sock send: "HELLO"
+    HandlerResult continue: st

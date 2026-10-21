@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `FakeProxy`: a `{#tcp, ...}` message from another socket reaches
+/// `handleUserInfo:`, not `handleData:socket:state:`.
+RecordingHandler subclass: FakeProxy
+
+  handleConnection: _sock state: st =>
+    Erlang erlang send: self pid msg: {#tcp, #othersocket, "otherdata"}
+    HandlerResult continue: st
+
+  handleUserInfo: msg =>
+    msg match: [
+      {#tcp, _other, _data} -> self socket send: "Got other data";
+      _ -> nil
+    ]

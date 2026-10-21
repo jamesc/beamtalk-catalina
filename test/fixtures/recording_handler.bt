@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Base of the `handler_test` fixtures. Where the Elixir handlers log from a
+/// callback and the test captures the log, these append events to a list
+/// in the Ets table named by `handlerOptions at: #table`, and the test
+/// reads it. The closing callbacks and the exit reason are always recorded.
+Handler subclass: RecordingHandler
+
+  /// Append `event` to the log.
+  note: event =>
+    table := Ets named: (self handlerOptions at: #table)
+    table at: #log put: ((table at: #log ifAbsent: [#()]) add: event)
+
+  handleClose: _sock state: st => self note: {#close, st}
+
+  handleError: reason socket: _sock state: _st => self note: {#error, reason}
+
+  handleShutdown: _sock state: _st => self note: #shutdown
+
+  handleTimeout: _sock state: _st => self note: #timeout
+
+  terminate: reason =>
+    self note: {#exit, reason}
+    super terminate: reason

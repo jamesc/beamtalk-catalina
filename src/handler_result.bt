@@ -1,0 +1,98 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HandlerResult — what a `Handler` callback answers to say what happens to
+/// the connection next, as the continuation tuples of Thousand Island's
+/// `ThousandIsland.Handler`:
+///
+/// | Thousand Island | Catalina |
+/// |---|---|
+/// | `{:continue, st}` | `HandlerResult continue: st` |
+/// | `{:continue, st, timeout}` | `HandlerResult continue: st timeout: ms` |
+/// | `{:continue, st, {:persistent, t}}` | `HandlerResult continue: st persistentTimeout: ms` |
+/// | `{:continue, st, {:continue, c}}` | `HandlerResult continue: st then: #selector` |
+/// | `{:switch_transport, {mod, opts}, st}` | `HandlerResult switchTransport: T options: opts state: st` |
+/// | `{:switch_transport, {mod, opts}, st, x}` | `switchTransport:options:state:` + `timeout:`, `persistentTimeout:` or `then:` |
+/// | `{:close, st}` | `HandlerResult close: st` |
+/// | `{:error, reason, st}` | `HandlerResult error: reason state: st` |
+///
+/// A timeout is milliseconds or `#infinity`. `then: #selector` runs that
+/// unary method of the handler next, before any other message
+/// (`continueWith:`, OTP's `handle_continue`).
+///
+/// ## Examples
+/// ```beamtalk
+/// (HandlerResult continue: 3) kind        // => #continue
+/// (HandlerResult close: 3) kind           // => #close
+/// (HandlerResult error: #nope state: 3) reason   // => #nope
+/// ```
+sealed Value subclass: HandlerResult
+  field: kind = #continue
+  field: state = nil
+  field: timeout = nil
+  field: persistent = false
+  field: then = nil
+  field: transport = nil
+  field: options = nil
+  field: reason = nil
+
+  /// Keep reading, with the socket's read timeout.
+  class sealed continue: st -> HandlerResult => self kind: #continue state: st
+
+  /// Keep reading, timing out after `ms` this time only.
+  class sealed continue: st timeout: ms -> HandlerResult =>
+    (self kind: #continue state: st) withTimeout: ms
+
+  /// Keep reading, and make `ms` the socket's read timeout from now on.
+  class sealed continue: st persistentTimeout: ms -> HandlerResult =>
+    ((self kind: #continue state: st) withTimeout: ms) withPersistent: true
+
+  /// Keep reading, and run the unary method `selector` next.
+  class sealed continue: st then: selector :: Symbol -> HandlerResult =>
+    (self kind: #continue state: st) withThen: selector
+
+  /// Upgrade the connection to `transport` (TLS, say), then keep reading.
+  class sealed switchTransport: transport options: options state: st -> HandlerResult =>
+    ((self kind: #switchTransport state: st) withTransport: transport) withOptions: options
+
+  /// As `switchTransport:options:state:`, timing out after `ms` this time only.
+  class sealed switchTransport: transport options: options state: st timeout: ms -> HandlerResult =>
+    (self
+      switchTransport: transport
+      options: options
+      state: st) withTimeout: ms
+
+  /// As `switchTransport:options:state:`, making `ms` the read timeout from now on.
+  class sealed switchTransport: transport options: options state: st persistentTimeout: ms -> HandlerResult =>
+    ((self
+      switchTransport: transport
+      options: options
+      state: st) withTimeout: ms) withPersistent: true
+
+  /// As `switchTransport:options:state:`, then run the unary method `selector`.
+  class sealed switchTransport: transport options: options state: st then: selector :: Symbol -> HandlerResult =>
+    (self
+      switchTransport: transport
+      options: options
+      state: st) withThen: selector
+
+  /// Close the connection (`handleClose:state:` runs).
+  class sealed close: st -> HandlerResult => self kind: #close state: st
+
+  /// Close the connection with an error (`handleError:socket:state:` runs).
+  /// `#timeout` is a read timeout (`handleTimeout:state:` runs instead).
+  class sealed error: reason state: st -> HandlerResult =>
+    (self kind: #error state: st) withReason: reason
+
+  class sealed kind: kind :: Symbol state: st -> HandlerResult =>
+    // The keyword constructor, not `new:`, which raises in a direct-called
+    // class method (BT-4029).
+    HandlerResult
+      kind: kind
+      state: st
+      timeout: nil
+      persistent: false
+      then: nil
+      transport: nil
+      options: nil
+      reason: nil

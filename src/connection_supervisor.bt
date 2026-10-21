@@ -10,7 +10,7 @@
 /// a connection that ends is not restarted.
 ///
 /// Args: the server's `ServerConfig`.
-DynamicSupervisor(Server) subclass: ConnectionSupervisor
+DynamicSupervisor(Handler) subclass: ConnectionSupervisor
 
   childClass => self args handler
 
