@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// CatalinaLogger — log Catalina's telemetry events, as Thousand Island's
+/// `ThousandIsland.Logger`. Not `Logger`, which is the stdlib's.
+///
+/// `attach: level` logs, through the stdlib `Logger`, every Catalina event
+/// at `level` and the levels above it:
+///
+/// | Level | Events | Logged with |
+/// |---|---|---|
+/// | `#error` | acceptor `spawn_error`, `econnaborted`, `accept_error`, `emfile` | `Logger error:` |
+/// | `#info` | listener `start`, `stop` | `Logger info:` |
+/// | `#debug` | acceptor and connection `start`, `stop` | `Logger debug:` |
+/// | `#trace` | connection `ready`, `async_recv`, `recv`, `send`, `sendfile` and their errors, `socket_shutdown` | `Logger debug:` (there is no trace level) |
+///
+/// `detach: level` stops logging at `level` and the levels below it. Each
+/// line is the event name, its metadata and its measurements.
+///
+/// ## Examples
+/// ```beamtalk
+/// CatalinaLogger attach: #info   // => Result ok: nil
+/// CatalinaLogger detach: #error  // => nil (everything off)
+/// ```
+sealed typed Object subclass: CatalinaLogger
+
+  /// Every level, most severe first.
+  class sealed levels -> List(Symbol) => #(#error, #info, #debug, #trace)
+
+  /// The events logged at exactly `level`.
+  class sealed eventsAt: level :: Symbol -> List(List(Symbol)) =>
+    level match: [
+      #error -> #(#(#catalina, #acceptor, #spawn_error), #(#catalina, #acceptor, #econnaborted), #(#catalina, #acceptor, #accept_error), #(#catalina, #acceptor, #emfile));
+      #info -> #(#(#catalina, #listener, #start), #(#catalina, #listener, #stop));
+      #debug -> #(#(#catalina, #acceptor, #start), #(#catalina, #acceptor, #stop), #(#catalina, #connection, #start), #(#catalina, #connection, #stop));
+      _ -> #(#(#catalina, #connection, #ready), #(#catalina, #connection, #async_recv), #(#catalina, #connection, #recv), #(#catalina, #connection, #recv_error), #(#catalina, #connection, #send), #(#catalina, #connection, #send_error), #(#catalina, #connection, #sendfile), #(#catalina, #connection, #sendfile_error), #(#catalina, #connection, #socket_shutdown))
+    ]
+
+  /// The `telemetry` handler id for `level`.
+  class sealed handlerId: level :: Symbol -> String =>
+    "CatalinaLogger." ++ level asString
+
+  /// Log `level` and every level above it. `Result error:` (kind
+  /// `#handler_exists`) if `level` itself is already attached; a level
+  /// above it that is already attached is left as it is.
+  class sealed attach: level :: #error | #info | #debug | #trace -> Result(Nil, Error) =>
+    result := Result ok: nil
+    self levels
+      do: [:each |
+        (self index: each) <= (self index: level)
+          ifTrue: [
+            attached := self attachExactly: each
+            each =:= level ifTrue: [result := attached]
+          ]
+      ]
+    result
+
+  /// Stop logging `level` and every level below it. Idempotent.
+  class sealed detach: level :: #error | #info | #debug | #trace -> Nil =>
+    self levels
+      do: [:each |
+        (self index: each) >= (self index: level) ifTrue: [
+          Telemetry detach: (self handlerId: each)
+        ]
+      ]
+    nil
+
+  /// `level`'s position in `levels` (0 if it is not one).
+  class sealed index: level :: Symbol -> Integer =>
+    (self levels indexOf: level) ifNil: [0]
+
+  class sealed attachExactly: level :: Symbol -> Result(Nil, Error) =>
+    Telemetry
+      attach: (self handlerId: level)
+      toAll: (self eventsAt: level)
+      do: [:event :measurements :metadata |
+        line := event printString
+          ++ " metadata: "
+          ++ metadata printString
+          ++ ", measurements: "
+          ++ measurements printString
+        level match: [
+          #error -> Logger error: line;
+          #info -> Logger info: line;
+          _ -> Logger debug: line
+        ]
+      ]

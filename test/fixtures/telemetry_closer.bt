@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Telemetry.Closer` from `handler_test.exs`: says HELLO and closes.
+Handler subclass: TelemetryCloser
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: "HELLO"
+    HandlerResult close: st

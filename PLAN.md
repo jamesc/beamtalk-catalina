@@ -741,7 +741,59 @@ The plan as written:
 - Fixtures: copy `test/support/{ca,cert,key}.pem` and `sendfile` into
   `test/fixtures/`.
 
-### Phase 5: Telemetry (`telemetry_test`, telemetry assertions across suites)
+### Phase 5: Telemetry (`telemetry_test`, telemetry assertions across suites) — done (BT-4054)
+
+166 tests in all. `TelemetryTest` (25) covers:
+- `telemetry_test.exs`;
+- the telemetry assertions the other suites deferred:
+  - listener start and stop;
+  - acceptor `emfile`, `accept_error`, `spawn_error` (including a failed
+    ownership transfer);
+  - TCP `recv`/`send`, and exactly one connection start and stop;
+  - handler start, ready after start, `async_recv`, stop on client close,
+    stop with the `getstat` counters, stop with the error and no
+    exception, and an `exception` event for each of raise, throw and exit
+    and for a raising `handleData:`;
+  - server `spawn_error` at `numConnections`, and the listener/acceptor
+    spans;
+  - SSL: a stalled handshake starts but is never ready, a handshake is
+    start then ready, and exactly one stop when the handshake fails;
+- `CatalinaLogger`.
+
+`SurfaceTest` now checks `Socket telemetrySpan` against the connection
+span. The `[native.dependencies]` telemetry entry is gone; `src/` uses only
+the stdlib facade.
+
+- `CatalinaTelemetry` (`src/catalina_telemetry.bt`) is Thousand Island's
+  span struct as a Value. Its event methods answer the span (a Value method
+  may not answer nil). The exception marker is a process-dictionary entry,
+  as in Elixir.
+- The listener span means the listener overrides `terminate:`, so it traps
+  exits. That is harmless, since it never blocks. `Listener listenerSpan`
+  hands the parent span to the acceptors.
+- The acceptor's `stop` event (with `#connections`) fires when it sees
+  `closed`. On a whole-server `stop`, that races with the supervisor
+  killing the acceptor, in Thousand Island as here. So the test stops the
+  listener first, as the shutdown listener does.
+- `spawn_error`'s `#error` is the handler start's Exception, where Elixir
+  has the `init/1` stop reason.
+- An exception is caught with `on: Exception do:` inline around each
+  callback (kind `#exit` for an `ExitError`, `#throw` for a `ThrowError`,
+  otherwise `#error`). The span's `exception` event fires, then the error
+  is re-signalled, so the handler still crashes.
+- Fixed in passing: the acceptor now stops the `withTimeout:` proxy it
+  creates to ask the listener for its socket.
+- `CatalinaLogger` is the minimal Logger moved here from Phase 6.
+
+The plan as written:
+
+- **Known gap (BT-4057).** `Handler raised:on:` (PR #13) emits the
+  `exception` event, then re-raises with `error signal`. That raises a
+  caught `ExitError`/`ThrowError` as an error with a new stacktrace, so a
+  callback calling `exit(normal)` ends the connection abnormally, where
+  Thousand Island's `:erlang.raise(kind, reason, stack)` ends it normally.
+  When `Exception>>pass` lands, switch to it, and test that `exit(normal)`
+  ends the connection cleanly.
 
 - Also the minimal `Logger` from Phase 6: attach a `Telemetry` handler that
   logs at `#error`/`#info`/`#debug`/`#trace`. Name it so it does not clash
@@ -851,9 +903,9 @@ Thousand Island. `SurfaceTest` (7 tests, 141 in all) covers it:
 README.md § Public API lists the stable surface, and AGENTS.md points at
 it.
 
-- **Verified after Phase 5:** `Socket telemetrySpan` and its span context.
-  Today it carries whatever span the acceptor passed (nil until Phase 5),
-  and the test checks only that.
+- **Verified in Phase 5 (BT-4054):** `Socket telemetrySpan` is the
+  connection's `CatalinaTelemetry` span, and its `telemetrySpanContext`
+  matches the `connection start` event's (`SurfaceTest`).
 - **Gap (BT-4052):** Bandit's HTTP/2 handler handles a linked stream
   process's `{:EXIT, pid, reason}` in `handle_info` and resets that stream.
   A Beamtalk trapping `Server` cannot: a non-parent abnormal `EXIT` always

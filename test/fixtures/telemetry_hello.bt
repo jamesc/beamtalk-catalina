@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HelloOnConnect` under a name only `TelemetryTest` uses: `TelemetryCollector`
+/// keeps the events whose `#handler` is this class, so events from other
+/// test classes' servers, which run at the same time, are not counted.
+HelloOnConnect subclass: TelemetryHello

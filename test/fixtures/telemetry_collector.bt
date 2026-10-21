@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `TelemetryHelpers` from Thousand Island's tests: attach one handler to
+/// every Catalina event and record the ones for a given handler class, as
+/// `{event, measurements, metadata}` tuples in an Ets table's `#events`
+/// list. The handler runs in the emitting process, so it records in Ets
+/// rather than in the test.
+sealed typed Object subclass: TelemetryCollector
+
+  /// Every event Catalina emits.
+  class sealed events -> List(List(Symbol)) =>
+    #(#(#catalina, #listener, #start), #(#catalina, #listener, #stop), #(#catalina, #acceptor, #start), #(#catalina, #acceptor, #stop), #(#catalina, #acceptor, #spawn_error), #(#catalina, #acceptor, #econnaborted), #(#catalina, #acceptor, #accept_error), #(#catalina, #acceptor, #emfile), #(#catalina, #connection, #start), #(#catalina, #connection, #stop), #(#catalina, #connection, #exception), #(#catalina, #connection, #ready), #(#catalina, #connection, #async_recv), #(#catalina, #connection, #recv), #(#catalina, #connection, #recv_error), #(#catalina, #connection, #send), #(#catalina, #connection, #send_error), #(#catalina, #connection, #sendfile), #(#catalina, #connection, #sendfile_error), #(#catalina, #connection, #socket_shutdown))
+
+  /// Record the events whose metadata names `handler` in the table `name`
+  /// (whose name is also the handler id).
+  class sealed attachAll: handler :: Object table: name :: Symbol -> Nil =>
+    (Telemetry
+      attach: name
+      toAll: self events
+      do: [:event :measurements :metadata |
+        (metadata at: #handler ifAbsent: [nil]) =:= handler
+          ifTrue: [
+            table := Ets named: name
+            table at: #events put: ((table at: #events ifAbsent: [
+              #()
+            ]) add: {event, measurements, metadata})
+          ]
+      ]) unwrap
+    nil
+
+  class sealed detach: name :: Symbol -> Nil => Telemetry detach: name
+
+  /// The events recorded so far.
+  class sealed eventsIn: name :: Symbol -> List(Tuple) =>
+    (Ets named: name) at: #events ifAbsent: [#()]
+
+  /// The recorded events named `span` `suffix`.
+  class sealed events: span :: Symbol named: suffix :: Symbol in: name :: Symbol -> List(Tuple) =>
+    wanted := #(#catalina) add: span
+    wanted := wanted add: suffix
+    (self eventsIn: name) select: [:e | (e at: 1) =:= wanted]
+
+  /// Wait up to three seconds for a `span` `suffix` event; answer the first
+  /// one's `{event, measurements, metadata}`, or nil.
+  class sealed await: span :: Symbol named: suffix :: Symbol in: name :: Symbol -> Tuple | Nil =>
+    300
+      timesRepeat: [
+        (self
+          events: span
+          named: suffix
+          in: name) isEmpty ifTrue: [Timer sleep: 10]
+      ]
+    found := self
+      events: span
+      named: suffix
+      in: name
+    found isEmpty ifTrue: [nil] ifFalse: [found first]

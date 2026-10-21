@@ -1,0 +1,356 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `telemetry_test.exs`, and the telemetry
+/// assertions the other suites deferred to Phase 5: `listener_test`,
+/// `acceptor_test`, `socket_test` (TCP and SSL), `handler_test`'s
+/// "telemetry" block and `server_test`'s two telemetry cases.
+/// `TelemetryCollector` records the events for one handler class in this
+/// test's Ets table.
+TestCase subclass: TelemetryTest
+
+  tableName -> Symbol => #catalinaTelemetryTest
+
+  setUp =>
+    Ets new: self tableName type: #set
+    FlakyTransport acceptResults: #()
+    FlakyTransport controllingProcessResults: #()
+    self
+
+  tearDown =>
+    TelemetryCollector detach: self tableName
+    HandlerHarness stopAll: self tableName
+    (Ets named: self tableName) delete
+
+  /// Record `handler`'s events, then start a server for it.
+  start: handler :: Handler class options: options :: Dictionary -> Integer =>
+    TelemetryCollector attachAll: handler table: self tableName
+    HandlerHarness
+      start: handler
+      options: options
+      table: self tableName
+
+  start: handler :: Handler class -> Integer => self start: handler options: #{}
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  recv: client :: Object -> Object =>
+    result := TCPTransport
+      recv: client
+      length: 0
+      timeout: 3000
+    result isOk ifTrue: [result value] ifFalse: [result error]
+
+  /// The first `span` `suffix` event, waiting up to three seconds.
+  await: span :: Symbol named: suffix :: Symbol -> Tuple | Nil =>
+    TelemetryCollector
+      await: span
+      named: suffix
+      in: self tableName
+
+  count: span :: Symbol named: suffix :: Symbol -> Integer =>
+    (TelemetryCollector
+      events: span
+      named: suffix
+      in: self tableName) size
+
+  measurementsOf: event :: Tuple | Nil -> Dictionary =>
+    self deny: event isNil
+    m :: Dictionary := event at: 2
+    m
+
+  metadataOf: event :: Tuple | Nil -> Dictionary =>
+    self deny: event isNil
+    m :: Dictionary := event at: 3
+    m
+
+  isReference: value :: Object -> Boolean => value isKindOf: Reference
+
+  /// The last element of each `#connection` event's name, in order.
+  connectionEventNames -> List(Symbol) =>
+    names := #()
+    (TelemetryCollector eventsIn: self tableName)
+      do: [:e |
+        name :: List(Symbol) := e at: 1
+        (name at: 2) =:= #connection ifTrue: [names := names add: name last]
+      ]
+    names
+
+  // ===== telemetry_test.exs =====
+  testStartSpansKeepCallerSuppliedTimes =>
+    TelemetryCollector attachAll: TelemetryTest table: self tableName
+    CatalinaTelemetry
+      startSpan: #connection
+      measurements: #{#monotonic_time => 123, #system_time => 456}
+      metadata: #{#handler => TelemetryTest}
+    event := self await: #connection named: #start
+    measurements := self measurementsOf: event
+    self assert: (measurements at: #monotonic_time) equals: 123
+    self assert: (measurements at: #system_time) equals: 456
+    metadata := self metadataOf: event
+    self assert: (metadata at: #handler) equals: TelemetryTest
+    self assert: (self isReference: (metadata at: #telemetry_span_context))
+
+  // ===== listener_test.exs =====
+  testListenerStartEvent =>
+    port := self start: TelemetryEcho
+    event := self await: #listener named: #start
+    measurements := self measurementsOf: event
+    self assert: ((measurements at: #monotonic_time) isKindOf: Integer)
+    self assert: ((measurements at: #system_time) isKindOf: Integer)
+    metadata := self metadataOf: event
+    self assert: (metadata at: #handler) equals: TelemetryEcho
+    self assert: (self isReference: (metadata at: #telemetry_span_context))
+    self assert: (metadata at: #local_address) equals: {0, 0, 0, 0}
+    self assert: (metadata at: #local_port) equals: port
+    self assert: (metadata at: #transport_module) equals: TCPTransport
+    self assert: (metadata at: #transport_options) equals: #()
+
+  testListenerStopEvent =>
+    port := self start: TelemetryEcho
+    (HandlerHarness serverIn: self tableName) listener unwrap stop
+    event := self await: #listener named: #stop
+    self assert: ((self measurementsOf: event) at: #duration) >= 0
+    metadata := self metadataOf: event
+    self assert: (metadata at: #local_port) equals: port
+    self assert: (metadata at: #handler) equals: TelemetryEcho
+
+  // ===== acceptor_test.exs =====
+  testEmfileEvent =>
+    FlakyTransport acceptResults: #(#emfile)
+    self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    event := self await: #acceptor named: #emfile
+    self assert: ((self measurementsOf: event) at: #error) equals: #emfile
+    self assert: (self isReference: ((self metadataOf: event) at: #telemetry_span_context))
+
+  testAcceptErrorEvent =>
+    FlakyTransport acceptResults: #(#ehostunreach)
+    self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    event := self await: #acceptor named: #accept_error
+    self assert: ((self measurementsOf: event) at: #error) equals: #ehostunreach
+
+  testSpawnErrorEvent =>
+    port := self start: TelemetryFailInit
+    self connect: port
+    event := self await: #acceptor named: #spawn_error
+    // The handler's start failure (an Exception here, where Elixir has the
+    // `init/1` stop reason).
+    self deny: ((self measurementsOf: event) at: #error) isNil
+
+  testOwnershipTransferFailureIsASpawnError =>
+    FlakyTransport controllingProcessResults: #(#badarg)
+    port := self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    self connect: port
+    event := self await: #acceptor named: #spawn_error
+    self assert: ((self measurementsOf: event) at: #error) equals: {#controlling_process, #badarg}
+
+  // ===== socket_test.exs (TCP) =====
+  testRecvAndSendEvents =>
+    port := self start: TelemetryBlockingEcho
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "HELLO"
+    self assert: (self recv: client) equals: "HELLO"
+    recv := self await: #connection named: #recv
+    self assert: ((self measurementsOf: recv) at: #data) equals: "HELLO"
+    self assert: ((self metadataOf: recv) at: #handler) equals: TelemetryBlockingEcho
+    self assert: (self isReference: ((self metadataOf: recv) at: #telemetry_span_context))
+    send := self await: #connection named: #send
+    self assert: ((self measurementsOf: send) at: #data) equals: "HELLO"
+
+  testExactlyOneConnectionStartAndStop =>
+    port := self start: TelemetryBlockingEcho
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "HELLO"
+    self recv: client
+    (Erlang gen_tcp) close: client
+    self deny: (self await: #connection named: #stop) isNil
+    Timer sleep: 300
+    self assert: (self count: #connection named: #start) equals: 1
+    self assert: (self count: #connection named: #stop) equals: 1
+
+  // ===== handler_test.exs: telemetry =====
+  testConnectionStartEvent =>
+    port := self start: TelemetryCloser
+    client := self connect: port
+    local := ((Erlang inet) sockname: client) unwrap
+    event := self await: #connection named: #start
+    self assert: (((self measurementsOf: event) at: #system_time) isKindOf: Integer)
+    metadata := self metadataOf: event
+    self assert: (metadata at: #handler) equals: TelemetryCloser
+    self assert: (self isReference: (metadata at: #parent_telemetry_span_context))
+    self assert: (metadata at: #remote_address) equals: (local at: 1)
+    self assert: (metadata at: #remote_port) equals: (local at: 2)
+
+  testReadyFollowsStart =>
+    port := self start: TelemetryCloser
+    self connect: port
+    self deny: (self await: #connection named: #ready) isNil
+    self assert: (self connectionEventNames take: 2) equals: #(#start, #ready)
+
+  testAsyncRecvEvent =>
+    port := self start: TelemetryCloseOnData
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "ping"
+    event := self await: #connection named: #async_recv
+    self assert: ((self measurementsOf: event) at: #data) equals: "ping"
+
+  testStopEventOnClientShutdown =>
+    port := self start: TelemetryHello
+    client := self connect: port
+    local := ((Erlang inet) sockname: client) unwrap
+    self assert: (self recv: client) equals: "HELLO"
+    (Erlang gen_tcp) close: client
+    event := self await: #connection named: #stop
+    self assert: ((self measurementsOf: event) at: #duration) >= 0
+    metadata := self metadataOf: event
+    self assert: (metadata at: #remote_port) equals: (local at: 2)
+    self assert: (self isReference: (metadata at: #parent_telemetry_span_context))
+
+  testStopEventCarriesSocketCounters =>
+    port := self start: TelemetryCloser
+    self connect: port
+    measurements := self measurementsOf: (self await: #connection named: #stop)
+    self assert: (measurements at: #recv_cnt) equals: 0
+    self assert: (measurements at: #recv_oct) equals: 0
+    self assert: (measurements at: #send_cnt) equals: 1
+    self assert: (measurements at: #send_oct) equals: 5
+
+  testStopEventCarriesTheError =>
+    port := self start: TelemetryError
+    self connect: port
+    event := self await: #connection named: #stop
+    self assert: ((self metadataOf: event) at: #error) equals: #nope
+    Timer sleep: 100
+    self assert: (self count: #connection named: #exception) equals: 0
+
+  testExceptionEventWhenACallbackRaises => self assertExceptionEventFor: #error
+
+  testExceptionEventWhenACallbackThrows => self assertExceptionEventFor: #throw
+
+  testExceptionEventWhenACallbackExits => self assertExceptionEventFor: #exit
+
+  assertExceptionEventFor: kind :: Symbol -> Nil =>
+    port := self start: TelemetryRaiser options: #{
+      #handlerOptions => #{#kind => kind}
+    }
+    self connect: port
+    event := self await: #connection named: #exception
+    self assert: ((self measurementsOf: event) at: #duration) >= 0
+    metadata := self metadataOf: event
+    self assert: (metadata at: #kind) equals: kind
+    self deny: (metadata at: #reason) isNil
+    self assert: ((metadata at: #stacktrace) isKindOf: List)
+    Timer sleep: 100
+    self assert: (self count: #connection named: #stop) equals: 0
+    nil
+
+  testExceptionEventWhenHandleDataRaises =>
+    port := self start: TelemetryDataRaiser
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "boom"
+    event := self await: #connection named: #exception
+    metadata := self metadataOf: event
+    self assert: (metadata at: #kind) equals: #error
+    self assert: ((metadata at: #reason) printString includesSubstring: "data nope")
+    Timer sleep: 100
+    self assert: (self count: #connection named: #stop) equals: 0
+
+  // ===== server_test.exs: telemetry =====
+  testSpawnErrorWhenNumConnectionsIsReached =>
+    port := self start: TelemetryEcho options: #{
+      #numConnections => 1,
+      #maxConnectionsRetryWait => 100
+    }
+    client := self connect: port
+    other := self connect: port
+    (Erlang gen_tcp) send: client with: "HELLO"
+    (Erlang gen_tcp) send: other with: "BONJOUR"
+    event := self await: #acceptor named: #spawn_error
+    self assert: (((self measurementsOf: event) at: #monotonic_time) isKindOf: Integer)
+
+  testListenerAndAcceptorSpansOnStartAndStop =>
+    self start: TelemetryEcho
+    listenerStart := self metadataOf: (self await: #listener named: #start)
+    acceptorStart := self await: #acceptor named: #start
+    acceptorMetadata := self metadataOf: acceptorStart
+    self assert: (acceptorMetadata at: #parent_telemetry_span_context) equals: (listenerStart at: #telemetry_span_context)
+    // Stop the listener first, as the shutdown listener does, so the
+    // acceptor sees `closed` and stops its span. In a whole-server `stop`
+    // that races with the supervisor killing the acceptor, in Thousand
+    // Island as here.
+    srv := HandlerHarness serverIn: self tableName
+    srv listener unwrap stop
+    acceptorStop := self await: #acceptor named: #stop
+    self assert: ((self measurementsOf: acceptorStop) at: #connections) equals: 0
+    self deny: (self await: #listener named: #stop) isNil
+    srv stop
+
+  // ===== socket_test.exs (SSL) =====
+  testStalledHandshakeStartsButIsNeverReady =>
+    port := self
+      start: TelemetryRecording
+      options: #{
+        #transport => SSLTransport,
+        #transportOptions => HandlerHarness tlsServerOptions,
+        #handshakeTimeout => 500
+      }
+    client := self connect: port
+    self deny: (self await: #connection named: #start) isNil
+    self assert: (HandlerHarness await: {#error, #timeout} in: self tableName)
+    self assert: (self count: #connection named: #ready) equals: 0
+    (Erlang gen_tcp) close: client
+
+  testHandshakeWithinTimeoutIsStartThenReady =>
+    port := self
+      start: TelemetryEcho
+      options: #{
+        #transport => SSLTransport,
+        #transportOptions => HandlerHarness tlsServerOptions,
+        #handshakeTimeout => 5000
+      }
+    client := (HandlerHarness tlsConnect: port options: #()) unwrap
+    self deny: (self await: #connection named: #ready) isNil
+    self assert: (self connectionEventNames take: 2) equals: #(#start, #ready)
+    SSLTransport close: client
+
+  testExactlyOneStopWhenTheHandshakeFails =>
+    port := self
+      start: TelemetryEcho
+      options: #{
+        #transport => SSLTransport,
+        #transportOptions => HandlerHarness tlsServerOptions
+      }
+    attempt := HandlerHarness
+      tlsConnect: port
+      options: #({#ciphers, #(#{
+        #cipher => #rc4_128,
+        #key_exchange => #rsa,
+        #mac => #md5,
+        #prf => #default_prf
+      })})
+    self assert: attempt isError
+    self deny: (self await: #connection named: #stop) isNil
+    Timer sleep: 300
+    self assert: (self count: #connection named: #start) equals: 1
+    self assert: (self count: #connection named: #stop) equals: 1
+
+  // ===== CatalinaLogger =====
+  testLoggerAttachesCumulativelyAndDetaches =>
+    self assert: (CatalinaLogger attach: #debug) isOk
+    // #debug attached #error, #info and #debug, but not #trace.
+    self assert: (CatalinaLogger attach: #debug) error kind equals: #handler_exists
+    self assert: (CatalinaLogger attach: #info) error kind equals: #handler_exists
+    self assert: (CatalinaLogger attach: #trace) isOk
+    // A server runs with the logger attached.
+    port := self start: TelemetryBlockingEcho
+    client := self connect: port
+    (Erlang gen_tcp) send: client with: "HI"
+    self assert: (self recv: client) equals: "HI"
+    self assert: (CatalinaLogger detach: #error) equals: nil
+    self assert: (CatalinaLogger attach: #error) isOk
+    CatalinaLogger detach: #error

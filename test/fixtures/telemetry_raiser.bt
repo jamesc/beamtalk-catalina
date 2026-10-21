@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Telemetry.Exception` from `handler_test.exs`: `handleConnection:` raises,
+/// throws or exits, as `handlerOptions at: #kind` says.
+Handler subclass: TelemetryRaiser
+
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    options :: Dictionary := st
+    kind := options at: #kind
+    kind =:= #throw ifTrue: [Erlang erlang throw: "nope"]
+    kind =:= #exit ifTrue: [Erlang erlang exit: "nope"]
+    Error signal: "nope"

@@ -8,9 +8,6 @@ description = "Pure-Beamtalk socket server, a port of Thousand Island"
 
 [dependencies]
 
-[native.dependencies]
-telemetry = "~> 1.3"
-
 # Every class is `typed`; a type warning fails the build (PLAN.md, AGENTS.md).
 [diagnostics]
 type = "error"

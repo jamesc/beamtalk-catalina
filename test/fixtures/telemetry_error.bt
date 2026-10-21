@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Telemetry.Error` from `handler_test.exs`.
+Handler subclass: TelemetryError
+
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult error: #nope state: st
