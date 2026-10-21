@@ -21,8 +21,9 @@ jobs:
           otp-version: "28.5"
 
       - name: Install Beamtalk
+        # edge tracks beamtalk main per merge; catalina depends on unreleased stdlib work (BT-3957)
         run: |
-          curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --nightly --prefix /usr/local
+          curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --edge --prefix /usr/local
           beamtalk --version
 
       - name: Install just
