@@ -1,8 +1,32 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Catalina — main class for the catalina library.
-Object subclass: Catalina
+/// Catalina — a socket server: an acceptor pool handing each connection to a
+/// handler process. A port of Thousand Island.
+///
+/// `start:` takes the `ServerConfig` options and answers the running
+/// `ServerSupervisor`. Each call starts an independent server, so a node can
+/// run several; `srv stop` stops one and leaves the others running. With a
+/// `{#name, n}` entry in `supervisorOptions` the server is registered under
+/// `n` (from a bounded set of names, ADR 0079) and `ServerSupervisor named:
+/// n` finds it.
+///
+/// ## Examples
+/// ```beamtalk
+/// srv := (Catalina start: #{#port => 0, #handler => EchoHandler}) unwrap
+/// srv listenerInfo     // => Result ok: {{0, 0, 0, 0}, 54321}
+/// srv connectionPids   // => Result ok: #()
+/// srv stop
+/// ```
+sealed Object subclass: Catalina
 
-  /// Return a greeting string.
-  class greet => "Hello from catalina!"
+  /// Start a server. `Result error:` if the options are invalid or the
+  /// server cannot start (the port is taken, say).
+  class sealed start: options :: Dictionary -> Result =>
+    configured := Result tryDo: [ServerConfig fromOptions: options]
+    configured isError ifTrue: [^configured]
+    config := configured value
+    name := Erlang proplists get_value: #name with: config supervisorOptions
+    name =:= #undefined ifTrue: [
+      Result tryDo: [ServerSupervisor spawnWith: config]
+    ] ifFalse: [ServerSupervisor spawnWith: config as: name]

@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `WaitingHandler` from `connection_test.exs`: it records its start, the
+/// ready message and its exit reason in the Ets table named by
+/// `handlerOptions`. It overrides `terminate:`, so it traps exits.
+Server subclass: WaitingHandler
+  state: handlerOptions = nil
+
+  initialize => self record: #started value: self pid
+
+  handleInfo: msg =>
+    msg match: [
+      {#catalina_ready, _raw, _config, _span, _start} -> self record: #ready value: self pid;
+      _ -> nil
+    ]
+
+  terminate: reason => self record: #terminated value: reason
+
+  record: key value: value =>
+    (Ets named: self.handlerOptions) at: key put: value

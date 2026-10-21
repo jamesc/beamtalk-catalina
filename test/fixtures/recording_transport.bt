@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `TestTransport` from `listener_test.exs`: just enough of a transport for
+/// the listener to start, which records the port it was asked to listen on
+/// in a persistent term.
+sealed Object subclass: RecordingTransport
+
+  class sealed listen: port :: Integer options: _options :: List -> Result =>
+    Erlang persistent_term put: #catalinaRecordingTransport with: port
+    (Erlang gen_tcp) listen: port with: #(#binary, {#active, false})
+
+  class sealed sockname: socket :: Object -> Result =>
+    (Erlang inet) sockname: socket
+
+  class sealed close: socket :: Object -> Result =>
+    (Erlang gen_tcp) close: socket
+
+  /// The port of the last `listen:options:`.
+  class sealed lastPort -> Object =>
+    Erlang persistent_term get: #catalinaRecordingTransport with: nil

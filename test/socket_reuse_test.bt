@@ -1,0 +1,139 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `socket_reuse_test.exs`. As there, a platform
+/// without `SO_REUSEPORT` (the listener fails with `eaddrinuse` or
+/// `enotsup`) skips the checks.
+TestCase subclass: SocketReuseTest
+
+  config: options :: Dictionary -> ServerConfig =>
+    ServerConfig fromOptions: (options at: #handler put: EchoHandler)
+
+  /// A started listener, or nil where reuseport is unsupported.
+  listenerFor: options :: Dictionary -> Listener | Nil =>
+    started := Result tryDo: [Listener startFor: (self config: options)]
+    started isOk
+      ifTrue: [started value]
+      ifFalse: [
+        self assert: (self isUnsupported: started error printString)
+        nil
+      ]
+
+  isUnsupported: message :: String -> Boolean =>
+    (message includesSubstring: "eaddrinuse") or: [
+      message includesSubstring: "enotsup"
+    ]
+
+  freePort -> Integer =>
+    ls := ((Erlang gen_tcp) listen: 0 with: #()) unwrap
+    port := ((Erlang inet) port: ls) unwrap
+    (Erlang gen_tcp) close: ls
+    port
+
+  echo: data :: String to: port :: Integer -> Object =>
+    client := ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+    (Erlang gen_tcp) send: client with: data
+    reply := ((Erlang gen_tcp)
+      recv: client
+      with: 0
+      with: 1000) unwrap
+    (Erlang gen_tcp) close: client
+    reply
+
+  testPortZeroBindsEveryListenSocketToTheAdvertisedPort =>
+    listener := self
+      listenerFor: #{
+        #port => 0,
+        #numListenSockets => 3,
+        #transportOptions => #({#reuseport, true})
+      }
+    listener isNil
+      ifFalse: [
+        info := listener listenerInfo
+        listener listenSockets do: [:s |
+          self assert: (TCPTransport sockname: s) unwrap equals: info
+        ]
+        listener stop
+      ]
+
+  testUnixDomainSocketsWithSeveralListenersFailCleanly =>
+    path := File tempDirectory ++ "/catalina_uds_" ++ System uniqueId printString ++ ".sock"
+    result := Result
+      tryDo: [
+        Listener
+          startFor: (self
+            config: #{
+              #port => 0,
+              #numListenSockets => 2,
+              #transportOptions => #({#ip, {#local, path}}, {#reuseport, true})
+            })
+      ]
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "eaddrinuse")
+    File delete: path
+
+  testCreatesSeveralSocketsWhenReuseportIsEnabled =>
+    port := self freePort
+    listener := self
+      listenerFor: #{
+        #port => port,
+        #numListenSockets => 3,
+        #transportOptions => #({#reuseport, true})
+      }
+    listener isNil
+      ifFalse: [
+        sockets := listener listenSockets
+        self assert: sockets size equals: 3
+        self assert: sockets asSet size equals: 3
+        info := listener listenerInfo
+        self assert: (info at: 2) equals: port
+        sockets do: [:s |
+          self assert: (TCPTransport sockname: s) unwrap equals: info
+        ]
+        listener stop
+      ]
+
+  testServesConnectionsOverSeveralListenSockets =>
+    started := Catalina
+      start: #{
+        #port => 0,
+        #handler => EchoHandler,
+        #numListenSockets => 3,
+        #numAcceptors => 6,
+        #transportOptions => #({#reuseport, true})
+      }
+    started isOk
+      ifTrue: [
+        srv := started value
+        port := srv listenerInfo unwrap at: 2
+        self assert: port > 0
+        (1 to: 5)
+          do: [:i |
+            message := "hello" ++ i printString
+            self assert: (self echo: message to: port) equals: message
+          ]
+        srv stop
+      ]
+      ifFalse: [self assert: (self isUnsupported: started error printString)]
+
+  testAcceptorsAreDistributedOverTheListenSockets =>
+    started := Catalina
+      start: #{
+        #port => 0,
+        #handler => EchoHandler,
+        #numListenSockets => 2,
+        #numAcceptors => 8,
+        #transportOptions => #({#reuseport, true})
+      }
+    started isOk
+      ifTrue: [
+        srv := started value
+        port := srv listenerInfo unwrap at: 2
+        self assert: (self echo: "test" to: port) equals: "test"
+        srv stop
+      ]
+      ifFalse: [self assert: (self isUnsupported: started error printString)]

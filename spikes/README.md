@@ -13,10 +13,9 @@ The spikes are kept out of `just test` because they use loopback sockets and
 wall-clock timing. CI runs `just spikes` as a non-blocking step
 (`continue-on-error`) and prints the spike 6 numbers into the log.
 
-CI installs the latest beamtalk nightly, which at the time of writing
-predates BT-3966 (`terminateChild:`/`whichChildren` by id). Three spike 3
-tests fail there with `does not understand 'terminateChild:'` until the
-nightly catches up. Against beamtalk main all 21 tests pass.
+CI installs the beamtalk `edge` build, which tracks main per merge, so the
+spikes run against the same stdlib (BT-3966's `terminateChild:`/
+`whichChildren` by id included) as local builds from main.
 
 Toolchain: beamtalk 0.4.0 built from main at BT-3958, OTP 28.
 

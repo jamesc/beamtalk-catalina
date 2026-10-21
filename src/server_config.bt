@@ -35,9 +35,10 @@
 /// ```
 sealed typed Value subclass: ServerConfig
   field: port :: Integer = 4000
-  field: transport :: Object = TCPTransport
+  field: transport :: Dynamic = TCPTransport
   field: transportOptions :: List = #()
-  field: handler :: Object = nil
+  // `Dynamic = nil` would be the natural type; it warns (BT-4032).
+  field: handler :: Actor class | Nil = nil
   field: handlerOptions :: Object = #()
   field: genServerOptions :: List = #()
   field: supervisorOptions :: List = #()

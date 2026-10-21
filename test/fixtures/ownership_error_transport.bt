@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `OwnershipErrorTransport` from `connection_test.exs`. Its "socket" is a
+/// `{tableName, reason}` tuple; `controllingProcess:pid:` records the pid
+/// and fails with `reason`, and `close:` records the close, both in that Ets
+/// table. Everything else is unsupported.
+sealed Object subclass: OwnershipErrorTransport
+
+  class sealed table: socket :: Tuple -> Ets => Ets named: (socket at: 1)
+
+  class sealed controllingProcess: socket :: Tuple pid: pid :: Pid -> Result =>
+    (self table: socket) at: #controllingProcess put: pid
+    Result error: (socket at: 2)
+
+  class sealed close: socket :: Tuple -> Result =>
+    (self table: socket) at: #closed put: true
+    Result ok: nil
+
+  class sealed listen: _port :: Integer options: _options :: List -> Result =>
+    Result error: #enotsup
+
+  class sealed accept: _listenSocket :: Object -> Result =>
+    Result error: #enotsup
+
+  class sealed handshake: socket :: Object -> Result => Result ok: socket
+
+  class sealed upgrade: _socket :: Object options: _options :: Object -> Result =>
+    Result error: #unsupported_upgrade
+
+  class sealed recv: _socket :: Object length: _length :: Integer timeout: _timeout :: Object -> Result =>
+    Result error: #enotsup
+
+  class sealed send: _socket :: Object data: _data :: Object -> Result =>
+    Result error: #enotsup
+
+  class sealed sendfile: _socket :: Object filename: _filename :: String offset: _offset :: Integer length: _length :: Integer -> Result =>
+    Result error: #enotsup
+
+  class sealed getopts: _socket :: Object options: _options :: List -> Result =>
+    Result error: #enotsup
+
+  class sealed setopts: _socket :: Object options: _options :: List -> Result =>
+    Result error: #enotsup
+
+  class sealed shutdown: _socket :: Object how: _way :: Symbol -> Result =>
+    Result error: #enotsup
+
+  class sealed sockname: _socket :: Object -> Result => Result error: #enotsup
+
+  class sealed peername: _socket :: Object -> Result => Result error: #enotsup
+
+  class sealed peercert: _socket :: Object -> Result =>
+    Result error: #not_secure
+
+  class sealed isSecure -> Boolean => false
+
+  class sealed getstat: _socket :: Object -> Result => Result error: #enotsup
+
+  class sealed negotiatedProtocol: _socket :: Object -> Result =>
+    Result error: #protocol_not_negotiated
+
+  class sealed connectionInformation: _socket :: Object -> Result =>
+    Result error: #not_secure

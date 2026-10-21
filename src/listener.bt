@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Listener — owns a server's listen sockets, as Thousand Island's
+/// `ThousandIsland.Listener`.
+///
+/// It opens `numListenSockets` sockets when it starts. Sockets after the
+/// first bind to the port the first one actually got, so port 0 works with
+/// several sockets (`reuseport`). If any socket fails to open, the ones
+/// already open are closed and the start fails with the transport's error.
+///
+/// Acceptors ask for their socket with `acceptorInfo:`, round-robin over
+/// the sockets. When the listener stops, its sockets close and every
+/// acceptor's `accept` answers `closed`, which ends it normally: that is
+/// how a server stops accepting while its connections drain.
+///
+/// Args: `#config`, the server's `ServerConfig`. Restart: `#transient`.
+///
+/// The listener telemetry span arrives in Phase 5.
+Actor subclass: Listener
+  state: config = nil
+  state: sockets = #()
+  state: localInfo = nil
+
+  class supervisionPolicy => #transient
+
+  /// The start function `ServerSupervisor` uses (`withClassMethod:`). The
+  /// supervisor runs it itself, and `spawnWith:` waits for `initialize`, so
+  /// a socket that cannot be opened fails the server's start, as
+  /// `{stop, Reason}` from Thousand Island's `init/1` does. A plain
+  /// `withArgs:` child's `initialize` runs only after its start has
+  /// returned, so its failure would not (BT-4033).
+  class startFor: config :: ServerConfig -> Listener =>
+    self spawnWith: #{#config => config}
+
+  /// Which listen socket (1-based) acceptor `id` uses: `(id - 1) rem n + 1`,
+  /// as Ranch and Thousand Island distribute them.
+  class sealed socketIndexFor: id :: Integer count: n :: Integer -> Integer =>
+    (id - 1) % n + 1
+
+  initialize => self openSockets
+
+  /// The local `{ip, port}` of the first listen socket.
+  listenerInfo => self.localInfo
+
+  /// The listen socket acceptor `id` accepts on.
+  acceptorInfo: id :: Integer =>
+    self.sockets at: (Listener socketIndexFor: id count: self.sockets size)
+
+  /// The listen sockets, in order.
+  listenSockets => self.sockets
+
+  openSockets =>
+    transport := self.config transport
+    first := transport listen: self.config port options: self.config transportOptions
+    first isError ifTrue: [self closeAllAndSignal: first error]
+    self.sockets := #() add: first value
+    info := transport sockname: first value
+    info isError ifTrue: [self closeAllAndSignal: info error]
+    self.localInfo := info value
+    port := self bindPort: self.localInfo
+    2
+      to: self.config numListenSockets
+      do: [:_i |
+        next := transport listen: port options: self.config transportOptions
+        next isError ifTrue: [self closeAllAndSignal: next error]
+        self.sockets := self.sockets add: next value
+      ]
+
+  /// The port further sockets bind to: the one the OS gave the first
+  /// socket, or the configured one for a non-IP (Unix domain) socket.
+  bindPort: info -> Object =>
+    (((info isKindOf: Tuple) and: [
+      info size =:= 2
+    ]) and: [
+      (info at: 2) isKindOf: Integer
+    ]) ifTrue: [info at: 2] ifFalse: [self.config port]
+
+  /// Close what is open and fail the start with the transport's reason.
+  closeAllAndSignal: reason :: Object =>
+    self.sockets do: [:s | self.config transport close: s]
+    self.sockets := #()
+    Error signal: "Listener could not open its sockets: " ++ reason printString

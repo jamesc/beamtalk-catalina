@@ -1,0 +1,105 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `listener_test.exs`. The Elixir tests call
+/// `Listener.init/1` and `handle_call/3` directly; here each test spawns a
+/// `Listener` and sends it messages. The telemetry cases (`listener` span
+/// start and stop) move to Phase 5.
+TestCase subclass: ListenerTest
+
+  /// A port that was free a moment ago (Thousand Island uses a fixed 4004).
+  freePort -> Integer =>
+    ls := ((Erlang gen_tcp) listen: 0 with: #()) unwrap
+    port := ((Erlang inet) port: ls) unwrap
+    (Erlang gen_tcp) close: ls
+    port
+
+  configFor: port :: Integer -> ServerConfig => self config: #{#port => port}
+
+  config: options :: Dictionary -> ServerConfig =>
+    ServerConfig fromOptions: ((options at: #handler put: ListenerTest) at: #numAcceptors put: 10)
+
+  // ===== init/1 =====
+  testFailsToStartIfPortCannotBeBound =>
+    port := self freePort
+    ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
+    result := Result
+      tryDo: [
+        Listener startFor: (self config: #{
+          #port => port,
+          #transportOptions => #({#reuseaddr, false})
+        })
+      ]
+    self assert: result isError
+    // The transport's reason is in the instantiation error's hint.
+    self assert: (result error printString includesSubstring: "eaddrinuse")
+    (Erlang gen_tcp) close: ls
+
+  testStartsWithOneSocketAndItsLocalInfo =>
+    port := self freePort
+    listener := Listener startFor: (self configFor: port)
+    self assert: listener listenSockets size equals: 1
+    self assert: listener listenerInfo equals: {{0, 0, 0, 0}, port}
+    listener stop
+
+  testListensUsingTheConfiguredTransport =>
+    port := self freePort
+    listener := Listener startFor: (self config: #{
+      #port => port,
+      #transport => RecordingTransport
+    })
+    self assert: RecordingTransport lastPort equals: port
+    listener stop
+
+  testListensOnTheConfiguredPort =>
+    port := self freePort
+    ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
+    (Erlang gen_tcp) close: ls
+    listener := Listener startFor: (self configFor: port)
+    // `error` is typed as the spec's raw reason but is an Exception (BT-4023).
+    @expect dnu
+    self assert: (((Erlang gen_tcp) listen: port with: #()) error reason) equals: #eaddrinuse
+    listener stop
+
+  testClosesItsSocketsWhenItStops =>
+    port := self freePort
+    listener := Listener startFor: (self configFor: port)
+    socket := listener acceptorInfo: 1
+    listener stop
+    self assert: (TCPTransport sockname: socket) isError
+
+  // ===== handle_call/3 =====
+  testListenerInfoAnswersTheLocalInfo =>
+    listener := Listener startFor: (self configFor: 0)
+    info := listener listenerInfo
+    self assert: (info at: 1) equals: {0, 0, 0, 0}
+    self assert: (info at: 2) > 0
+    listener stop
+
+  testAcceptorInfoAnswersTheListenSocket =>
+    listener := Listener startFor: (self configFor: 0)
+    self assert: (listener acceptorInfo: 1) equals: listener listenSockets first
+    listener stop
+
+  // ===== multiple listen sockets =====
+  testCreatesASingleSocketWhenNumListenSocketsIsOne =>
+    listener := Listener startFor: (self config: #{
+      #port => 0,
+      #numListenSockets => 1
+    })
+    self assert: listener listenSockets size equals: 1
+    listener stop
+
+  testEveryAcceptorGetsTheOnlySocket =>
+    listener := Listener startFor: (self configFor: 0)
+    socket := listener listenSockets first
+    self assert: (listener acceptorInfo: 1) equals: socket
+    self assert: (listener acceptorInfo: 2) equals: socket
+    self assert: (listener acceptorInfo: 10) equals: socket
+    listener stop
+
+  testAcceptorInfoDistributionWithSeveralSockets =>
+    // Ranch-like: (id - 1) rem n + 1.
+    self assert: ((1 to: 5) collect: [:id |
+      Listener socketIndexFor: id count: 3
+    ]) asList equals: #(1, 2, 3, 1, 2)

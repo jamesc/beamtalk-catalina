@@ -8,10 +8,15 @@
 /// later `SSLTransport`), so every requirement here is a `class` method.
 /// Conformance is structural: a class conforms when it answers all of them.
 ///
-/// Expected failures answer `Result error:`. An `{error, R}` from the
-/// underlying Erlang call arrives as an Exception whose `reason` is `R`
-/// (ADR 0076, BT-3954); a stub's own error (`#not_secure`) is the Symbol
-/// itself.
+/// Expected failures answer `Result error:` holding the **bare Erlang
+/// reason**, as Thousand Island's `{:error, reason}`: usually a Symbol
+/// (`#closed`, `#timeout`, `#econnreset`, `#eaddrinuse`), possibly a Tuple
+/// (some SSL alerts), so the error side is typed `Object`. An FFI call's
+/// `{error, R}` arrives as an Exception (ADR 0076), so an implementation
+/// normalises it once, at this boundary, with `mapError: [:e | e reason]`
+/// (BT-3954). A stub answers its reason directly (`Result error:
+/// #not_secure`). Callers compare the error itself:
+/// `(TCPTransport recv: s length: 0 timeout: 100) error =:= #timeout`.
 ///
 /// **Seal the class and every class method** (`sealed Object subclass:`,
 /// `class sealed`). A class method of an open or stateful class runs in the

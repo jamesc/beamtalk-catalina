@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ServerSupervisor — the root of one Catalina server, as Thousand Island's
+/// `ThousandIsland.Server`. Start one with `Catalina start:`.
+///
+/// ```text
+/// ServerSupervisor (restForOne)              args: ServerConfig
+/// ├── #listener          Listener (transient)
+/// ├── #acceptorPool      AcceptorPoolSupervisor
+/// │   └── 1..numAcceptors  AcceptorSupervisor (restForOne)
+/// │       ├── #connections  ConnectionSupervisor (dynamic)
+/// │       └── #acceptor     Acceptor (transient)
+/// └── #shutdownListener  ShutdownListener
+/// ```
+///
+/// Each server is an anonymous instance (`spawnWith:`), so a node can run any
+/// number of them. Its children reach it through `#server => self` in their
+/// args; nothing in a configuration method sends a message to `self`.
+///
+/// ## Examples
+/// ```beamtalk
+/// srv := (Catalina start: #{#port => 0, #handler => EchoHandler}) unwrap
+/// srv listenerInfo   // => Result ok: {{0, 0, 0, 0}, 54321}
+/// srv stop
+/// ```
+Supervisor subclass: ServerSupervisor
+
+  strategy => #restForOne
+
+  childSpecs =>
+    config := self args
+    #(((Listener supervisionSpec
+      withId: #listener
+      withRestart: #transient
+      withArgs: #(config)) withClassMethod: #startFor:), (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool withArgs: #{
+      #server => self,
+      #config => config
+    }), (ShutdownListener supervisionSpec
+      withId: #shutdownListener
+      withRestart: #permanent
+      withArgs: #{#server => self}))
+
+  /// The server's configuration.
+  config -> ServerConfig => self args
+
+  /// The listener, or `Result error: #not_listening` while it is stopped.
+  listener -> Result =>
+    (self childWithId: #listener) andThen: [:l |
+      l isNil ifTrue: [Result error: #not_listening] ifFalse: [Result ok: l]
+    ]
+
+  /// The `{ip, port}` the server listens on (Thousand Island's
+  /// `listener_info/1`).
+  listenerInfo -> Result => self listener map: [:l | l listenerInfo]
+
+  /// The running `AcceptorSupervisor`s, in id order.
+  acceptorSupervisors -> List =>
+    pool := (self childWithId: #acceptorPool) unwrap
+    // `childWithId:` answers Object, so `children` is a DNU hint.
+    @expect dnu
+    pool isNil ifTrue: [#()] ifFalse: [pool children]
+
+  /// The pids of every live connection handler (Thousand Island's
+  /// `connection_pids/1`). It copies each connection supervisor's child
+  /// list, so use it at human timescales, not per request.
+  connectionPids -> Result =>
+    pids := #()
+    self acceptorSupervisors
+      do: [:accSup |
+        connections := (accSup childWithId: #connections) unwrap
+        connections isNil ifFalse: [
+          connections children do: [:h | pids := pids add: h pid]
+        ]
+      ]
+    Result ok: pids
