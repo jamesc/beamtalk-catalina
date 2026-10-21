@@ -26,7 +26,7 @@ sealed typed Object subclass: FlakyTransport
   /// before starting it there.
   class sealed freePort -> Integer =>
     listening := ((Erlang gen_tcp) listen: 0 with: #(#binary)) unwrap
-    port :: Integer := ((Erlang inet) port: listening) unwrap
+    port := ((Erlang inet) port: listening) unwrap
     (Erlang gen_tcp) close: listening
     port
 

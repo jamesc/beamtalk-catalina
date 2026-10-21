@@ -7,6 +7,6 @@
 RecordingHandler subclass: StrayTimeoutHandler
 
   handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
-    Erlang erlang send: self pid msg: #timeout
-    Erlang erlang send: self pid msg: #read_timeout
+    self pid send: #timeout
+    self pid send: #read_timeout
     HandlerResult continue: st

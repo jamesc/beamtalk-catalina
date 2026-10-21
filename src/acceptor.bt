@@ -91,7 +91,7 @@ typed Server subclass: Acceptor
     ]
 
   acceptNext -> Nil =>
-    Erlang erlang send: self pid msg: #accept
+    self pid send: #accept
     nil
 
   /// `attach` sends the first `#accept`, so the socket is set; an `#accept`

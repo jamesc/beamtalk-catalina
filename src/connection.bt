@@ -60,7 +60,7 @@ sealed typed Object subclass: Connection
         connections terminateChild: handler
         ^Result error: {#controlling_process, handedOff error}
       ]
-    Erlang erlang send: handler pid msg: {#catalina_ready, rawSocket, handlerConfig, span, startTime}
+    handler pid send: {#catalina_ready, rawSocket, handlerConfig, span, startTime}
     Result ok: nil
 
   /// `startChild:`, retried while the supervisor is full.

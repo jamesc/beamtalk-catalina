@@ -112,7 +112,7 @@ TestCase subclass: SurfaceTest
     // A sync call by name, and a cast: both reach `doesNotUnderstand:args:`.
     self assert: handler describe equals: "upper"
     handler describe!
-    Erlang erlang send: handler pid msg: {#plug_conn, #sent}
+    handler pid send: {#plug_conn, #sent}
     self assert: (HandlerHarness await: {#info, {#plug_conn, #sent}} in: self tableName)
     // A linked process's normal exit is absorbed, as Bandit's HTTP/1
     // handler ignores `{:EXIT, _, :normal}`. Seeing abnormal ones in

@@ -6,7 +6,7 @@
 RecordingHandler subclass: FakeProxy
 
   handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
-    Erlang erlang send: self pid msg: {#tcp, #othersocket, "otherdata"}
+    self pid send: {#tcp, #othersocket, "otherdata"}
     HandlerResult continue: st
 
   handleUserInfo: msg :: Object -> Object =>

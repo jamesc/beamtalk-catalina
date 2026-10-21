@@ -61,7 +61,7 @@ sealed typed Value subclass: CatalinaTelemetry
     timed := (timed includesKey: #system_time) ifTrue: [
       timed
     ] ifFalse: [timed at: #system_time put: self systemTime]
-    context := Erlang erlang make_ref
+    context := Reference new
     start := metadata at: #telemetry_span_context put: context
     self
       emit: name
