@@ -47,7 +47,8 @@ typed Server subclass: Acceptor
   state: config :: ServerConfig
   // Acquired once by `attach` and valid until the listener closes it, which
   // ends this acceptor. `acceptOnce` guards its read with `hasField:`.
-  late state: listenSocket :: Object
+  // A TCP listen socket is a Port, a TLS one an `sslsocket` record.
+  late state: listenSocket :: Port | Tuple
   late state: connections :: ConnectionSupervisor
   late state: handlerConfig :: HandlerConfig
   state: count :: Integer = 0

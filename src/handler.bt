@@ -67,10 +67,10 @@
 ///     HandlerResult continue: st
 /// ```
 typed Server subclass: Handler
-  // The server's `handlerOptions`, from the start args. `late`: given once
-  // at spawn and fixed for the connection's life. `Object`, since any term
-  // (nil included) is a valid option value.
-  late state: handlerOptions :: Object
+  // The server's `handlerOptions`, from the start args. Any term is a
+  // valid option value, nil included, so it is not `late` (a `late` slot's
+  // type must not admit nil; BT-4061).
+  state: handlerOptions :: Object = nil
   // Set by the ready message. Reads reachable from `handleInfo:` and
   // `terminate:` are guarded with `hasField:`.
   late state: socket :: Socket

@@ -300,3 +300,19 @@ TestCase subclass: ServerOperationsTest
     self assert: (self recv: client) equals: "HI"
     (Erlang gen_tcp) close: client
     File delete: path
+
+  testServesWithNilHandlerOptions =>
+    // Thousand Island accepts `handler_options: nil`; the first user state
+    // is then nil.
+    // Started directly: `HandlerHarness` puts its table into the options.
+    srv := (Catalina
+      start: #{
+        #port => 0,
+        #handler => EchoHandler,
+        #numAcceptors => 1,
+        #handlerOptions => nil
+      }) unwrap
+    client := self connect: (srv listenerInfo unwrap at: 2)
+    self send: "HI" to: client
+    self assert: (self recv: client) equals: "HI"
+    srv stop
