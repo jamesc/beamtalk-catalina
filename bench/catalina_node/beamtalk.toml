@@ -1,0 +1,16 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "catalina_node"
+version = "0.1.0"
+description = "Catalina's side of the bench and stress harness (not published)"
+
+[dependencies]
+catalina = { path = "../.." }
+
+# Typed as the library is (AGENTS.md): a type warning fails the build.
+[diagnostics]
+type = "error"
+type-annotation = "error"
+dnu = "error"

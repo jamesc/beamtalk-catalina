@@ -123,11 +123,70 @@ just lint
 just fmt      # check formatting (just fmt-fix to apply)
 just ci       # all of the above, as CI runs them
 just spikes   # the Phase 0 spikes (loopback sockets and timing)
+just bench    # Catalina vs Thousand Island (see below)
+just stress   # correctness under load and failure (see below)
 ```
 
 `PLAN.md` is the porting plan and records each phase's deviations from
 Thousand Island; `AGENTS.md` is the guide for coding agents. Every class is
 `typed` and the build fails on type warnings.
+
+## Benchmarks and stress tests
+
+Two harnesses check Catalina under load. Neither is part of `just test`.
+
+```bash
+just bench                  # Catalina vs Thousand Island, 5 interleaved rounds
+just bench --rounds 7 --duration 10000 --only echo_c100_64B,accept_tcp
+just stress                 # the stress tests, with a 30-minute soak
+just stress --smoke         # smaller sizes and a 1-minute soak (as CI runs it)
+just stress --only fuzz,chaos --impl catalina
+```
+
+They need Elixir 1.18 or later (`bench/thousand_island/.tool-versions`
+pins 1.20.1 on OTP 28.5) and `beamtalk` on the `PATH`. `bench/run.sh`
+builds everything first: the Catalina peer package (`bench/catalina_node`,
+the echo handlers), the [Thousand Island](https://hex.pm/packages/thousand_island)
+1.6.0 baseline (`bench/thousand_island`, a mix project with the
+equivalent handlers) and the Erlang harness, into `_build/bench`.
+
+Each server runs in its own peer VM, started with OTP's `peer` and driven
+over its control channel. The load generator runs in a third VM: a pool of
+client processes counting into shared `counters`, with a log-scale latency
+histogram. Both servers use the same configuration (echo handler, 100
+acceptors, the transports' default options and buffer sizes, the same
+certificate for TLS).
+
+**`just bench`** measures echo throughput and round-trip latency
+(p50/p99/p99.9) at 1, 10, 100 and 1,000 connections with 64 B and 64 KiB
+payloads; the accept rate under connection churn (connect, one echo, close);
+TLS handshakes per second and TLS echo at 100 connections; and bytes and
+processes per idle connection with 10,000 idle connections. Every round
+measures each row on Catalina and on Thousand Island back to back,
+alternating which goes first, so machine load hits both alike. The report
+gives the medians, every round's value, and the Catalina ÷ Thousand Island
+ratio, with the machine, versions and load averages. It is written to
+`_build/bench/report-*.md`, with the raw measurements in
+`_build/bench/raw-*.jsonl`. The client closes connections with a reset
+(linger 0), so churn does not run out of ephemeral ports to `TIME_WAIT`.
+`bench/RESULTS.md` holds the release measurements.
+
+**`just stress`** (`test/stress/`) runs each test against Catalina and,
+where the expectation is "as Thousand Island does", against Thousand Island
+with the same assertions:
+
+| Test | Checks |
+|---|---|
+| `fuzz_tcp`, `fuzz_tls` | random payloads from 0 to 1 MiB in random fragments over many connections come back byte for byte |
+| `leak_churn` | after 10,000 churn cycles (clean closes, resets, no data, mid-echo) process, port and ETS counts and the connection supervisors' children return to the baseline |
+| `leak_server_lifecycle` | starting and stopping TCP and TLS servers with live connections leaves nothing behind |
+| `limits_*` | at `numConnections` a connection waits out the retries and is closed unserved, is served if a slot frees in time, and the server recovers |
+| `timeout_*`, `half_close` | idle and slow-trickling connections close at `readTimeout` (bytes more often than that keep a connection open, as in Thousand Island); many slow-loris connections at once; half-close |
+| `chaos_*` | under load, random acceptors and handlers are killed: the server keeps serving, no bytes are corrupted, supervisors restart within their intensity, nothing leaks |
+| `lifecycle_*` | `suspend`/`resume` under load; `stop:` lets in-flight callbacks finish within `shutdownTimeout` and kills them past it |
+| `soak_mixed_load` | 30 minutes of mixed TCP and TLS load: no growth in process count or memory, and back to the baseline afterwards |
+
+Server logs go to `_build/stress/`.
 
 ## License
 
