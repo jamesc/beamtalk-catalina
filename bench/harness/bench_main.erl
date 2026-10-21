@@ -59,6 +59,8 @@ rows(full) ->
     [{echo_id(C, S), echo, #{conns => C, size => S}}
         || S <- [64, 65536], C <- [1, 10, 100, 1000]]
     ++ [{"accept_tcp", churn, #{workers => 32}},
+        %% Churn at the highest rate the clients can drive.
+        {"accept_tcp_w128", churn, #{workers => 128}},
         {"tls_handshake", churn, #{workers => 32, tls => true}},
         {"tls_echo_c100_64B", echo, #{conns => 100, size => 64, tls => true}},
         {"tls_echo_c100_64KiB", echo, #{conns => 100, size => 65536, tls => true}},
