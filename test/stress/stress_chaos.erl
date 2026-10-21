@@ -89,6 +89,7 @@ chaos(Ctx) ->
         Diff = maps:from_list([{K, {maps:get(K, Base), maps:get(K, After)}}
                                || K <- ?KEYS, maps:get(K, Base) =/= maps:get(K, After)]),
         stress_lib:check(Diff =:= #{}, "no leak after the chaos", Diff),
+        stress_lib:check_ets_rows(Base, After, Echoes),
         {AccKills, HandlerKills} = Kills,
         #{seconds => Seconds, acceptor_kills => AccKills, handler_kills => HandlerKills,
           echoes => Echoes, errors => Errors}

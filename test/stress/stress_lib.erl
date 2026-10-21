@@ -25,6 +25,7 @@
     echo_once/3,
     recv_all/3,
     elapsed_ms/1,
+    check_ets_rows/3,
     log/2
 ]).
 
@@ -124,6 +125,13 @@ recv_all(C, N, Timeout, Acc) ->
         {ok, B} -> {ok, iolist_to_binary(lists:reverse([B | Acc]))};
         Error -> Error
     end.
+
+%% ETS rows may move a little (timers, caches), but must not grow with the
+%% work done: allow one row per 100 units of `Work` (connections, say).
+check_ets_rows(Base, After, Work) ->
+    Grown = maps:get(ets_rows, After) - maps:get(ets_rows, Base),
+    check(Grown =< max(20, Work div 100), "ETS rows do not grow with the load",
+          #{base => maps:get(ets_rows, Base), now => maps:get(ets_rows, After), work => Work}).
 
 elapsed_ms(T0) -> erlang:monotonic_time(millisecond) - T0.
 

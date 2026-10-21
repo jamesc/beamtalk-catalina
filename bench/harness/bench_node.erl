@@ -328,6 +328,9 @@ stats() ->
         processes => erlang:system_info(process_count),
         ports => erlang:system_info(port_count),
         ets => length(ets:all()),
+        %% Rows across every table: a table that only grows is a leak even
+        %% when the table count is steady.
+        ets_rows => lists:sum([N || T <- ets:all(), N <- [ets:info(T, size)], is_integer(N)]),
         memory => erlang:memory(total),
         process_memory => erlang:memory(processes),
         binary_memory => erlang:memory(binary),

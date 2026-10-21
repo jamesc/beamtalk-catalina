@@ -64,6 +64,7 @@ judge(Base, After, Samples, Errors, Minutes) ->
     Diff = maps:from_list([{K, {maps:get(K, Base), maps:get(K, After)}}
                            || K <- ?KEYS, maps:get(K, Base) =/= maps:get(K, After)]),
     stress_lib:check(Diff =:= #{}, "processes, ports and ETS back to baseline", Diff),
+    stress_lib:check_ets_rows(Base, After, Ok),
     #{minutes => Minutes, samples => length(Samples), echoes => Ok,
       processes_first_last => {Max(processes, First), Max(processes, Last)},
       memory_mib_first_last => {round(MemFirst / 1048576), round(MemLast / 1048576)}}.

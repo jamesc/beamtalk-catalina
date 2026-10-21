@@ -27,6 +27,7 @@ churn_leak(Ctx) ->
         {ok, Kinds} = churn(Port, Cycles, 32, false),
         Ms = stress_lib:elapsed_ms(T0),
         After = back_to(Ctx, Base),
+        stress_lib:check_ets_rows(Base, After, Cycles),
         #{cycles => Cycles, seconds => Ms / 1000, kinds => Kinds,
           processes => maps:get(processes, After), ports => maps:get(ports, After),
           ets => maps:get(ets, After)}
@@ -52,6 +53,7 @@ lifecycle_leak(Ctx) ->
     After = stress_lib:settle(Ctx, ?KEYS),
     Diff = diff(Base, After),
     stress_lib:check(Diff =:= #{}, "node back to baseline after server lifecycles", Diff),
+    stress_lib:check_ets_rows(Base, After, Rounds * 2 * 70),
     #{rounds => Rounds, processes => maps:get(processes, After)}.
 
 receive_close() ->
