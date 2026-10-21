@@ -43,6 +43,61 @@ srv stop: 15000      // stop, waiting up to 15 s for connections to finish
 TLS: pass `#transport => SSLTransport` and `#transportOptions =>
 #({#certfile, "cert.pem"}, {#keyfile, "key.pem"})`.
 
+## Public API
+
+This is the stable surface: what Buccaneer (the Bandit port) and other
+users may rely on. `SurfaceTest` exercises it the way Bandit uses Thousand
+Island. Anything not listed is internal.
+
+**Starting and running a server** (`Catalina`, `ServerSupervisor`):
+
+- `Catalina start: options -> Result(ServerSupervisor, Error)`.
+- `srv listenerInfo -> Result({ip, port})`, `connectionPids`, `status`
+  (`#running`/`#suspended`), `info` (`#status`, `#localInfo`,
+  `#activeConnections`), `suspend`, `resume`, `stop`, `stop: ms`.
+
+**Options** (`ServerConfig`): Thousand Island's, in camelCase.
+`ServerConfig optionNames` lists them (Bandit's
+`ServerConfig.__struct__()`): `port`, `transport`, `transportOptions`,
+`handler`, `handlerOptions`, `genServerOptions`, `supervisorOptions`,
+`numAcceptors`, `numListenSockets`, `numConnections`,
+`maxConnectionsRetryCount`, `maxConnectionsRetryWait`, `readTimeout`,
+`handshakeTimeout`, `shutdownTimeout`, `silentTerminateOnError`.
+
+**Handlers** (`Handler`, a `typed` `Server`; subclasses annotate their
+callbacks):
+
+- Callbacks: `handleConnection:state:`, `handleData:socket:state:`,
+  `handleClose:state:`, `handleError:socket:state:`,
+  `handleShutdown:state:`, `handleTimeout:state:`, `handleUserInfo:`.
+- State: `socket` and `userState` (Thousand Island's `{socket, state}`);
+  the first `userState` is `handlerOptions`.
+- `handleContinuation: aHandlerResult` re-arms from `handleUserInfo:` or
+  any other method.
+- A handler's own sync methods and casts (`!`) work beside the callbacks,
+  and `doesNotUnderstand:args:` forwards unknown ones, so a delegating
+  handler (Bandit's `DelegatingHandler`) needs nothing more.
+
+**`HandlerResult`**: `continue:`, `continue:timeout:`,
+`continue:persistentTimeout:`, `continue:then:`, `close:`, `error:state:`,
+`switchTransport:options:state:` (and its `timeout:`, `persistentTimeout:`
+and `then:` forms).
+
+**`Socket`**: `send:`, `recv`, `recv:`, `recv:timeout:`,
+`sendfile:offset:length:`, `setopts:`, `getopts:`, `shutdown:`, `close`,
+`peername`, `sockname`, `peercert`, `isSecure`, `getstat`,
+`negotiatedProtocol`, `connectionInformation`, `readTimeout`,
+`telemetrySpan`. Errors are bare Erlang reasons (`Result error: #closed`).
+
+**Transports**: `TCPTransport`, `SSLTransport`, and the `Transport`
+protocol for your own (sealed, with `class sealed` methods).
+
+Not there yet:
+- Telemetry spans and events come with the stdlib `Telemetry` facade
+  (`PLAN.md` § Phase 5). `telemetrySpan` is carried but empty until then.
+- A handler cannot handle a linked process's abnormal exit itself
+  (BT-4052).
+
 ## Classes
 
 | Class | Role | Thousand Island |

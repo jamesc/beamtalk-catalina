@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The protocol `UpperProtocol` switches to: plain echo, with a persistent
+/// 30 s read timeout, as Bandit's WebSocket handler sets one.
+sealed typed Object subclass: EchoProtocol
+
+  class sealed handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult continue: st
+
+  class sealed handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: data
+    HandlerResult continue: st persistentTimeout: 30000
+
+  class sealed describe -> String => "echo"

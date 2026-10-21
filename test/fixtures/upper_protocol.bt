@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A protocol implementation for `DelegatingHandler`, as Bandit's
+/// `HTTP1.Handler` is for its `DelegatingHandler`: it answers in upper case,
+/// and "switch" moves the connection to `EchoProtocol`.
+sealed typed Object subclass: UpperProtocol
+
+  class sealed handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult continue: st
+
+  class sealed handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    text :: String := data
+    options :: Dictionary := st
+    (text startsWith: "switch")
+      ifTrue: [
+        sock send: "switched"
+        HandlerResult continue: (options at: #delegate put: EchoProtocol)
+      ]
+      ifFalse: [
+        sock send: text uppercase
+        HandlerResult continue: st
+      ]
+
+  class sealed describe -> String => "upper"

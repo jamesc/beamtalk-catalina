@@ -123,6 +123,12 @@ camelCase (`num_acceptors` → `numAcceptors`, `handle_data/3` →
 `handleData:socket:state:`), and `{:error, reason}` maps to `Result error:
 reason` with the bare reason.
 
+## Stable surface
+
+README.md § Public API lists what Buccaneer and other users may rely on,
+and `test/surface_test.bt` pins it. Changing anything there is a breaking
+change: update both, and say so in the PR.
+
 ## Typing rule
 
 Every catalina class is `typed`, test fixtures included: annotate every

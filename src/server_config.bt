@@ -67,11 +67,16 @@ sealed typed Value subclass: ServerConfig
     self validateReuseport: config
     config
 
+  /// The option names `fromOptions:` accepts, as Bandit reads
+  /// `ThousandIsland.ServerConfig.__struct__()` to split its options from
+  /// Thousand Island's.
+  class sealed optionNames -> List(Symbol) => self new fieldNames
+
   /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
   /// unknown option is a typo the user should hear about, as Elixir's
   /// `struct!/2` reports it.
   class sealed validateKeys: options :: Dictionary -> Nil =>
-    known := self new fieldNames
+    known := self optionNames
     options keys
       do: [:key |
         (known includes: key) ifFalse: [
