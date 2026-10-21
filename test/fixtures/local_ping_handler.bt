@@ -10,7 +10,7 @@ RecordingHandler subclass: LocalPingHandler
     HandlerResult continue: st
 
   handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
-    self note: #ping
+    self note: {#ping, Erlang erlang monotonic_time: #millisecond}
     HandlerResult continue: st
 
   handleUserInfo: msg :: Object -> Object =>

@@ -236,13 +236,16 @@ TestCase subclass: HandlerTest
     // one 50 ms sleep can stretch past 100 ms, so the margin here is 5x.
     port := self start: LocalPingHandler options: #{#readTimeout => 250}
     client := self connect: port
+    sent := #()
     6
       timesRepeat: [
         self send: "ping" to: client
+        sent := sent add: (Erlang erlang monotonic_time: #millisecond)
         Timer sleep: 50
       ]
-    self assert: (self recv: client within: 10) equals: #timeout
-    self deny: (self log includes: #timeout)
+    got := self recv: client within: 10
+    Timer sleep: 300
+    self assert: {got, sent, self log} printString equals: "DIAG"
 
   testSyncRecvTimesOutAfterReadTimeout =>
     port := self start: SyncReadTimeout options: #{#readTimeout => 50}
