@@ -71,7 +71,12 @@ typed Server subclass: Acceptor
     // `childWithId:` answers Object; `#connections` is a ConnectionSupervisor.
     sup :: ConnectionSupervisor := (self.parent childWithId: #connections) unwrap
     self.connections := sup
-    self.listenSocket := (listener withTimeout: 15000) acceptorInfo: self.id
+    // A TimeoutProxy is an actor of its own and lives until stopped: one
+    // left running per acceptor start leaked a process (BT-4051 stress
+    // `leak_server_lifecycle`).
+    proxy := listener withTimeout: 15000
+    socket := [proxy acceptorInfo: self.id] ensure: [proxy stop]
+    self.listenSocket := socket
     self.handlerConfig := HandlerConfig fromServerConfig: self.config
     self acceptNext
 
