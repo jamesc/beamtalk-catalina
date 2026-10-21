@@ -11,7 +11,11 @@
 %%
 %%   erl -noshell -pa _build/bench/ebin -s bench_main main -extra \
 %%       [--rounds 5] [--duration 5000] [--warmup 1000] [--rows full|smoke]
-%%       [--only ROWID,...] [--out DIR]
+%%       [--only ROWID,...] [--out DIR] [--max-load L]
+%%
+%% With `--max-load L`, each round waits (up to 30 minutes) until the
+%% 1-minute load average is below L, so a shared machine is measured when
+%% it is quiet; the report records the load at every round.
 -module(bench_main).
 
 -export([main/0, rows/1]).
@@ -19,7 +23,8 @@
 main() ->
     Opts = parse(init:get_plain_arguments(), #{
         rounds => 5, duration => 5000, warmup => 1000, rows => full,
-        only => [], out => filename:join([os:getenv("BENCH_ROOT"), "_build", "bench"])
+        only => [], max_load => undefined,
+        out => filename:join([os:getenv("BENCH_ROOT"), "_build", "bench"])
     }),
     try run(Opts) of
         ok -> halt(0)
@@ -35,8 +40,12 @@ parse(["--warmup", N | T], O) -> parse(T, O#{warmup => list_to_integer(N)});
 parse(["--rows", R | T], O) -> parse(T, O#{rows => list_to_atom(R)});
 parse(["--only", R | T], O) -> parse(T, O#{only => string:split(R, ",", all)});
 parse(["--out", D | T], O) -> parse(T, O#{out => D});
+parse(["--max-load", L | T], O) -> parse(T, O#{max_load => list_to_number(L)});
 parse([], O) -> O;
 parse([X | _], _) -> error({unknown_argument, X}).
+
+list_to_number(S) ->
+    try list_to_integer(S) catch error:badarg -> list_to_float(S) end.
 
 %% === Rows ===
 
@@ -75,10 +84,13 @@ run(Opts = #{rounds := Rounds, out := Out}) ->
     log("bench: ~p rounds, ~p rows, ~p ms per measurement; ~s~n",
         [Rounds, length(Rows), maps:get(duration, Opts), load()]),
     Peers = maps:from_list([{I, bench_peer:start(I)} || I <- bench_peer:impls()]),
-    Results = lists:append([round(R, Rows, Peers, Opts, Raw) || R <- lists:seq(1, Rounds)]),
+    PerRound = [round(R, Rows, Peers, Opts, Raw) || R <- lists:seq(1, Rounds)],
+    Results = lists:append([Rs || {_, _, Rs} <- PerRound]),
     [bench_peer:stop(P) || P <- maps:values(Peers)],
     file:close(Raw),
-    Report = report(Rows, Results, Env#{started => Stamp, finished_load => load(), opts => Opts}),
+    Report = [report(Rows, Results, Env#{started => Stamp, finished_load => load(), opts => Opts}),
+              "\nLoad average (1, 5, 15 min) at the start of each round:\n\n",
+              [io_lib:format("- round ~p: ~s~n", [R, L]) || {R, L, _} <- PerRound]],
     ReportFile = filename:join(Out, "report-" ++ Tag ++ ".md"),
     ok = file:write_file(ReportFile, Report),
     io:put_chars(Report),
@@ -90,8 +102,10 @@ select(Rows, Only) -> [R || R = {Id, _, _} <- Rows, lists:member(Id, Only)].
 
 round(R, Rows, Peers, Opts, Raw) ->
     Order = case R rem 2 of 1 -> [catalina, ti]; 0 -> [ti, catalina] end,
-    log("round ~p (~s)~n", [R, load()]),
-    lists:append([[measure(R, Row, I, maps:get(I, Peers), Opts, Raw) || I <- Order] || Row <- Rows]).
+    wait_for_quiet(maps:get(max_load, Opts), erlang:monotonic_time(second) + 1800),
+    Load = load(),
+    log("round ~p (~s)~n", [R, Load]),
+    {R, Load, lists:append([[measure(R, Row, I, maps:get(I, Peers), Opts, Raw) || I <- Order] || Row <- Rows])}.
 
 measure(Round, {Id, Kind, Params}, Impl, Peer, Opts, Raw) ->
     Load = load(),
@@ -164,6 +178,22 @@ brief(_, M) ->
 us(undefined) -> "-";
 us(V) when V >= 1000 -> io_lib:format("~.2fms", [V / 1000]);
 us(V) -> io_lib:format("~wus", [round(V)]).
+
+%% Wait until the 1-minute load average is below Max, or the deadline.
+wait_for_quiet(undefined, _) -> ok;
+wait_for_quiet(Max, Deadline) ->
+    Load1 = load1(),
+    case Load1 < Max orelse erlang:monotonic_time(second) > Deadline of
+        true -> ok;
+        false ->
+            log("  load ~.2f >= ~p, waiting~n", [Load1, Max]),
+            timer:sleep(30000),
+            wait_for_quiet(Max, Deadline)
+    end.
+
+load1() ->
+    [L | _] = string:lexemes(load(), " "),
+    list_to_number(string:trim(L)).
 
 %% === Report ===
 
