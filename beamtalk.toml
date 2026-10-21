@@ -7,3 +7,6 @@ version = "0.1.0"
 description = "Pure-Beamtalk socket server, a port of Thousand Island"
 
 [dependencies]
+
+[native.dependencies]
+telemetry = "~> 1.3"

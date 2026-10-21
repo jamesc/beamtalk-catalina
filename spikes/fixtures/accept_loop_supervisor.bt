@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Spike 3: one `#transient` accept-loop child, as `AcceptorSupervisor` will
+/// hold one `Acceptor`. Args: `#acceptorClass`, `#listenSocket`, `#tableName`
+/// and `#shutdown` (the child's shutdown timeout in ms).
+Supervisor subclass: AcceptLoopSupervisor
+
+  childSpecs =>
+    #((((self args at: #acceptorClass) supervisionSpec
+      withId: #acceptor
+      withRestart: #transient
+      withArgs: #{
+        #listenSocket => (self args at: #listenSocket),
+        #tableName => (self args at: #tableName)
+      }) withShutdown: (self args at: #shutdown)))

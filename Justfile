@@ -12,6 +12,14 @@ build:
 test:
     beamtalk test
 
+# Run the Phase 0 spikes (loopback sockets and timers; not part of `test`)
+spikes:
+    #!/usr/bin/env bash
+    status=0
+    beamtalk test spikes -j 1 || status=$?
+    cat _build/spikes/echo_bench.txt 2>/dev/null && echo
+    exit $status
+
 # Check formatting
 fmt:
     beamtalk fmt-check

@@ -53,12 +53,18 @@ stdlib carry an OTP-shaped library.
 
 Two Beamtalk facts that shape the code (from `docs/ADR/0043`, `0065`):
 
-- **`self foo!` is a direct call, not a cast.** A loop that must yield between
-  iterations (the acceptor) is driven by a self-*message*:
-  `Erlang erlang send: self pid msg: #accept` handled in `handleInfo:`, which
-  re-sends after each `accept`. Blocking inside `handleInfo:` is fine for the
-  acceptor: it owns no other traffic, and the supervisor's exit signal kills
-  it while blocked, exactly as Elixir's `Task` is killed.
+- **A loop that must yield between iterations (the acceptor) is driven by a
+  self-*message*:** `Erlang erlang send: self pid msg: #accept` handled in
+  `handleInfo:`, which re-sends after each `accept`. (`self foo!` is now a real
+  cast to the actor's own mailbox too, so it would do the same; the spikes use
+  the self-message.) Blocking inside `handleInfo:` is fine for the acceptor:
+  it owns no other traffic, and the supervisor's exit signal kills it while
+  blocked, exactly as Elixir's `Task` is killed. **This holds only if the
+  acceptor does not override `terminate:`** (Phase 0 spike 3). Overriding it
+  makes the actor trap exits; the supervisor's `shutdown` then queues behind
+  the blocked `accept`, the supervisor waits the whole shutdown timeout, kills
+  it, and `terminate:` never runs. A blocked acceptor also cannot answer sync
+  calls, so nothing may call it.
 - **No `receive` in Beamtalk.** Thousand Island cancels its read timer *and*
   flushes a stale `:read_timeout` from the mailbox. Instead, every timer
   message carries a unique ref (`erlang:make_ref`) stored in state; a
@@ -91,8 +97,8 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 
 Formerly planned native helpers, now Beamtalk:
 
-- option map → inet proplist: a small `TransportOptions` class using
-  `Tuple withAll:` until BT-3969 lands.
+- option map → inet proplist: a small `TransportOptions` class using tuple
+  literals (`{#active, false}`, BT-3969, landed).
 - stop with structured reason: `self stopWith:` (BT-3967).
 - stale `read_timeout` flush: unnecessary with the ref-tagged timer idiom above.
 - SSL `sendfile`: the `file:pread` / `ssl:send` 1 MiB loop is a plain
@@ -153,16 +159,32 @@ Expected failures return `Result` (ADR 0060); misuse raises. Note ADR 0076
 coercion: `gen_tcp:send` returning `ok` arrives as `Result ok: nil`, and
 `{error, closed}` arrives as a `Result error:` wrapping an Exception, so
 `handleError:` receives an Exception (kind `#runtime_error`, message
-`"closed"`) rather than the raw atom. Document this difference.
+`"closed"`) rather than the raw atom; `e reason` gives back `#closed`
+(BT-3954). Document this difference. The type checker currently types that
+error side as the raw Symbol, so `r error reason` warns (BT-4023); expect a
+few `@expect dnu` until it is fixed.
 
 ## Phases
 
 Each phase ends green on `just ci` and with a commit. Tests mirror Thousand
 Island's `test/` file-by-file; the Elixir suite is the spec.
 
-### Phase 0: Spikes (half a day)
+### Phase 0: Spikes (half a day) — done (BT-4019)
 
-Throwaway `.bt` files proving the shaky assumptions before building on them:
+All six hold, two with conditions that the later phases must keep. Results,
+numbers and how to run them: [`spikes/README.md`](spikes/README.md).
+
+- (2) holds only while the accepted socket is passive until the handler arms
+  it after the ready message (`TransportOptions`' required `active false` is
+  load-bearing).
+- (3) holds only for an acceptor that does not override `terminate:` (see
+  "Two Beamtalk facts" above). No `Task`-like worker is needed.
+- (5) needs `telemetry` in `[native.dependencies]` (added), and every
+  `(Erlang telemetry)` site warns until BT-4022 is fixed.
+- (6) `handleInfo:` dispatch is ~0.4 µs; each inline FFI call is ~7-15 µs
+  (BT-4021), so FFI calls, not `handleInfo:`, dominate per-packet cost.
+
+The original list:
 
 1. A `Server` subclass can own a `gen_tcp` socket set `{active, once}`,
    receive `{tcp, S, Data}` in `handleInfo:`, and re-arm. (Expected: yes.)
@@ -178,9 +200,9 @@ Throwaway `.bt` files proving the shaky assumptions before building on them:
 6. Rough cost of the `handleInfo:` round trip per packet (`docs/performance.md`
    says ~1-3 µs per send; measure an echo of 10k small packets).
 
-Outcome: confirm or amend the module map. If (3) fails, that is a new
-stdlib issue under BT-3957 (a `Task`-like transient worker), not a reason to
-drop back to Erlang.
+Outcome: the module map stands. (3) did not fail, so no `Task`-like worker
+is needed. The rules the spikes added are folded into Phases 2, 3 and 5
+below.
 
 ### Phase 1: Config, TCP transport, Socket (`config_test`, `socket_test` TCP half, `transport_options_test`)
 
@@ -387,7 +409,9 @@ The rest of the phase:
   `acceptorInfo: id` (round-robin socket `rem(id-1, n)+1`); closes sockets on
   partial failure; `#transient`.
 - `Acceptor`: after `attach`, loops `transport accept:` → `Connection
-  start:`. Error classification exactly as `acceptor.ex`:
+  start:`. It must not override `terminate:` (spike 3), and no other process
+  calls it synchronously; tests observe it through telemetry or the
+  supervisor (`whichChildren`), not by calling it. Error classification exactly as `acceptor.ex`:
   `too_many_connections`/`spawn_error`/`controlling_process` → event + loop;
   `econnaborted`/`einval` → event + loop; the transient list (`enetdown`,
   `ehostunreach`, `etimedout`, ...) → `accept_error` + loop;
@@ -414,6 +438,9 @@ The rest of the phase:
 
 - `Handler`: abstract `Server` subclass. `initialize` traps exits, state is
   `{socket, userState}`.
+- `handleInfo:` is a `match:` whose arms each call a method
+  (`{#tcp, _s, data} -> self onData: data;`); a `[ ... ]` arm body is a block
+  value and does not run (BT-4024). It ends with `_ -> self handleUserInfo: msg`.
 - `handleInfo:` clauses: `{catalina_ready, ...}` (peername → label → span →
   `Socket new` → handshake → `:ready` event → `handleConnection:`), `{tcp|ssl,
   S, Data}`, `{tcp_closed|ssl_closed, S}`, `{tcp_error|ssl_error, S, R}`,
@@ -426,7 +453,8 @@ The rest of the phase:
   `switch_transport` path (note the Elixir quirk that passes an integer
   timeout as a GenServer timeout; decide whether to reproduce or fix, and
   document).
-- Lazy read timer: `readDeadline`, `send_after` only when no timer is running
+- Lazy read timer (proven by spike 4, `spikes/fixtures/read_timeout_server.bt`):
+  `readDeadline`, `send_after` only when no timer is running
   or the new deadline is earlier; on fire re-arm for the remainder or time out;
   timer messages are ref-tagged so a stale one is ignored instead of flushed;
   `#infinity` cancels. Stops use `self stopWith:` (BT-3967) with the same
@@ -453,6 +481,11 @@ The rest of the phase:
   `test/fixtures/`.
 
 ### Phase 5: Telemetry (`telemetry_test`, telemetry assertions across suites)
+
+- All `(Erlang telemetry)` calls live in `src/telemetry.bt`, so the
+  `unresolved_ffi` warnings (BT-4022) and the per-call FFI cost (BT-4021)
+  sit in one place. Each call site carries `@expect unresolved_ffi` until
+  BT-4022 lands.
 
 - Spans `listener`, `acceptor`, `connection` with `monotonic_time`,
   `system_time`, `telemetry_span_context`, `parent_telemetry_span_context`,

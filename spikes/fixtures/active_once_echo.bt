@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Spikes 1 and 6: a Server that owns an accepted `gen_tcp` socket in
+/// `{active, once}` mode, echoes every `{tcp, S, Data}` it receives in
+/// `handleInfo:` and re-arms. With `rearm` false it does not re-arm, to show
+/// that `{active, once}` delivers exactly one packet per arm.
+Server subclass: ActiveOnceEcho
+  state: sock = nil
+  state: rearm = true
+  state: packets = 0
+  state: tableName = nil
+
+  /// Take over a socket this process already controls and arm it.
+  own: aSocket =>
+    self.sock := aSocket
+    self arm
+    #ok
+
+  arm => (Erlang inet) setopts: self.sock with: #({#active, #once})
+
+  handleInfo: msg =>
+    msg match: [
+      {#tcp, _s, data} -> self onData: data;
+      {#tcp_closed, _s} -> self stopWith: {#shutdown, #peer_closed};
+      _ -> nil
+    ]
+
+  onData: data =>
+    self.packets := self.packets + 1
+    (Erlang gen_tcp) send: self.sock with: data
+    self.rearm ifTrue: [self arm]
+
+  packets => self.packets
+
+  /// The socket's current `active` option, as `inet:getopts/2` answers it.
+  activeOption => ((Erlang inet) getopts: self.sock with: #(#active)) unwrap
+
+  terminate: reason =>
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: #reason put: reason
+    ]
