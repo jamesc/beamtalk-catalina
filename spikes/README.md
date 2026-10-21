@@ -54,7 +54,10 @@ How to read these numbers:
   for Catalina's per-packet cost. It is filed as BT-4021.
 - `handleInfo:` itself costs about what PLAN.md expected: sub-microsecond
   dispatch, well inside the 1-3 µs estimate from `docs/performance.md`.
-- The Linux CI numbers are in the `Spikes` step log of each CI run.
+- Linux, GitHub Actions `ubuntu-latest` runner, OTP 28.5, one run: server echo
+  99 µs, passive baseline 89 µs, server path +10 µs, `handleInfo:` dispatch
+  0.59 µs, one inline FFI call 22.6 µs. Every CI run prints them in the
+  `Spikes` step log.
 
 ## Bugs and gaps filed
 
