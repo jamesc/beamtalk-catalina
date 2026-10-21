@@ -5,7 +5,7 @@
 /// `{tableName, reason}` tuple; `controllingProcess:pid:` records the pid
 /// and fails with `reason`, and `close:` records the close, both in that Ets
 /// table. Everything else is unsupported.
-sealed Object subclass: OwnershipErrorTransport
+sealed typed Object subclass: OwnershipErrorTransport
 
   class sealed table: socket :: Tuple -> Ets => Ets named: (socket at: 1)
 

@@ -35,21 +35,24 @@
 /// ```
 sealed typed Value subclass: ServerConfig
   field: port :: Integer = 4000
+  // Any class conforming to `Transport`; a protocol's class side has no type
+  // name, so it is Dynamic.
   field: transport :: Dynamic = TCPTransport
   field: transportOptions :: List = #()
-  // `Dynamic = nil` would be the natural type; it warns (BT-4032).
-  field: handler :: Actor class | Nil = nil
+  field: handler :: Handler class | Nil = nil
   field: handlerOptions :: Object = #()
   field: genServerOptions :: List = #()
   field: supervisorOptions :: List = #()
   field: numAcceptors :: Integer = 100
   field: numListenSockets :: Integer = 1
-  field: numConnections :: Object = 16384
+  // `Integer | #infinity` rather than the `Timeout` alias, whose Integer
+  // defaults are rejected (BT-4039).
+  field: numConnections :: Integer | #infinity = 16384
   field: maxConnectionsRetryCount :: Integer = 5
   field: maxConnectionsRetryWait :: Integer = 1000
-  field: readTimeout :: Object = 60000
-  field: handshakeTimeout :: Object = 5000
-  field: shutdownTimeout :: Object = 15000
+  field: readTimeout :: Integer | #infinity = 60000
+  field: handshakeTimeout :: Integer | #infinity = 5000
+  field: shutdownTimeout :: Integer | #infinity = 15000
   field: silentTerminateOnError :: Boolean = false
 
   /// A validated configuration from a Dictionary of options. Raises on an

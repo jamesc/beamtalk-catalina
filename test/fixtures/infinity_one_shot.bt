@@ -4,5 +4,5 @@
 /// `InfinityOneShotTimeout`: "ping" turns the read timeout off once.
 RecordingHandler subclass: InfinityOneShot
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st timeout: #infinity

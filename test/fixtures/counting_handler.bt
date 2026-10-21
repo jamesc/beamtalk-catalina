@@ -5,22 +5,22 @@
 /// callbacks, as a delegating Buccaneer handler has. It logs itself on
 /// connection so a test can reach it.
 RecordingHandler subclass: CountingHandler
-  state: packets = 0
+  state: packets :: Integer = 0
 
-  handleConnection: _sock state: st =>
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     self note: {#handler, self}
     HandlerResult continue: st
 
-  handleData: data socket: sock state: st =>
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
     self.packets := self.packets + 1
     sock send: data
     HandlerResult continue: st
 
   /// A sync method other processes may call.
-  packets => self.packets
+  packets -> Integer => self.packets
 
   /// A cast (`bump!`) that also changes state.
-  bump => self.packets := self.packets + 100
+  bump -> Integer => self.packets := self.packets + 100
 
   /// A sync method that writes to the socket from outside a callback.
-  greet: name => self socket send: "hi " ++ name
+  greet: name :: String -> Result => self socket send: "hi " ++ name

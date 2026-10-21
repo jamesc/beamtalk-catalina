@@ -5,4 +5,4 @@
 /// as one whose resource acquisition fails at connection setup would.
 Handler subclass: FailInitHandler
 
-  initialize => Error signal: "intentional_init_failure"
+  initialize -> Nil => Error signal: "intentional_init_failure"

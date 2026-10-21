@@ -4,6 +4,6 @@
 /// `HandleConnection.HelloWorld`: sends HELLO and keeps the connection.
 RecordingHandler subclass: HelloOnConnect
 
-  handleConnection: sock state: st =>
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
     sock send: "HELLO"
     HandlerResult continue: st

@@ -10,7 +10,7 @@ build:
 
 # Run the test suite
 test:
-    beamtalk test
+    beamtalk test --warnings-as-errors
 
 # Run the Phase 0 spikes (loopback sockets and timers; not part of `test`)
 spikes:

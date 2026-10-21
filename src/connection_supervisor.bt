@@ -10,10 +10,13 @@
 /// a connection that ends is not restarted.
 ///
 /// Args: the server's `ServerConfig`.
-DynamicSupervisor(Handler) subclass: ConnectionSupervisor
+typed DynamicSupervisor(Handler) subclass: ConnectionSupervisor
 
-  childClass => self args handler
+  childClass -> Class => self config handler
 
-  maxChildren => self args numConnections
+  maxChildren -> Integer | Symbol => self config numConnections
 
-  childShutdown => self args shutdownTimeout
+  childShutdown -> ShutdownTimeout | Nil => self config shutdownTimeout
+
+  /// The server's configuration (the start args).
+  config -> ServerConfig => self args

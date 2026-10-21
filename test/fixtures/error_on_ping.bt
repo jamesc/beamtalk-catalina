@@ -4,5 +4,5 @@
 /// `HandleData.Error`.
 RecordingHandler subclass: ErrorOnPing
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult error: #nope state: st

@@ -8,18 +8,23 @@
 Handler subclass: RecordingHandler
 
   /// Append `event` to the log.
-  note: event =>
-    table := Ets named: (self handlerOptions at: #table)
+  note: event :: Object -> Nil =>
+    options :: Dictionary := self handlerOptions
+    table := Ets named: (options at: #table)
     table at: #log put: ((table at: #log ifAbsent: [#()]) add: event)
 
-  handleClose: _sock state: st => self note: {#close, st}
+  handleClose: _sock :: Socket state: st :: Object -> Object =>
+    self note: {#close, st}
 
-  handleError: reason socket: _sock state: _st => self note: {#error, reason}
+  handleError: reason :: Object socket: _sock :: Socket state: _st :: Object -> Object =>
+    self note: {#error, reason}
 
-  handleShutdown: _sock state: _st => self note: #shutdown
+  handleShutdown: _sock :: Socket state: _st :: Object -> Object =>
+    self note: #shutdown
 
-  handleTimeout: _sock state: _st => self note: #timeout
+  handleTimeout: _sock :: Socket state: _st :: Object -> Object =>
+    self note: #timeout
 
-  terminate: reason =>
+  terminate: reason :: Object -> Nil =>
     self note: {#exit, reason}
     super terminate: reason

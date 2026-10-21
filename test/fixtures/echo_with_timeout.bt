@@ -4,6 +4,6 @@
 /// `EchoWithTimeout`.
 RecordingHandler subclass: EchoWithTimeout
 
-  handleData: data socket: sock state: st =>
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
     sock send: data
     HandlerResult continue: st

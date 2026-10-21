@@ -32,50 +32,58 @@
 ///
 /// Args: `#id`, `#parent` (its `AcceptorSupervisor`), `#server` and
 /// `#config`. Restart: `#transient`.
-Server subclass: Acceptor
-  state: id = nil
-  state: parent = nil
-  state: server = nil
-  state: config = nil
-  state: listenSocket = nil
-  state: connections = nil
-  state: handlerConfig = nil
-  state: count = 0
+typed Server subclass: Acceptor
+  state: id :: Integer
+  state: parent :: AcceptorSupervisor
+  state: server :: ServerSupervisor
+  state: config :: ServerConfig
+  // Set by `attach`, before the first `#accept`. Not `late`: it is read
+  // from `handleInfo:`, where an unguarded `late` read is flagged.
+  state: listenSocket :: Object = nil
+  late state: connections :: ConnectionSupervisor
+  late state: handlerConfig :: HandlerConfig
+  state: count :: Integer = 0
 
-  class supervisionPolicy => #transient
+  class supervisionPolicy -> RestartStrategy => #transient
 
   /// Errors `accept(2)` documents as retryable: conditions of one incoming
   /// connection, not of the listener.
-  class sealed transientErrors -> List =>
+  class sealed transientErrors -> List(Symbol) =>
     #(#enetdown, #enetunreach, #ehostdown, #ehostunreach, #enonet, #eproto, #enoprotoopt, #eopnotsupp, #etimedout)
 
   /// How long to pause when file descriptors run out (as Ranch does).
   class sealed fdExhaustionWait -> Integer => 100
 
-  initialize => self continueWith: #attach
+  initialize -> Nil =>
+    self continueWith: #attach
+    nil
 
-  attach =>
-    listener := (self.server childWithId: #listener) unwrap
-    self.connections := (self.parent childWithId: #connections) unwrap
+  attach -> Nil =>
+    listener := self.server listener unwrap
+    // `childWithId:` answers Object; `#connections` is a ConnectionSupervisor.
+    sup :: ConnectionSupervisor := (self.parent childWithId: #connections) unwrap
+    self.connections := sup
     self.listenSocket := (listener withTimeout: 15000) acceptorInfo: self.id
     self.handlerConfig := HandlerConfig fromServerConfig: self.config
     self acceptNext
 
-  handleInfo: msg =>
+  handleInfo: msg :: Object -> Nil =>
     msg match: [
       #accept -> self acceptOnce;
       _ -> nil
     ]
 
-  acceptNext => Erlang erlang send: self pid msg: #accept
+  acceptNext -> Nil =>
+    Erlang erlang send: self pid msg: #accept
+    nil
 
-  acceptOnce =>
+  acceptOnce -> Nil =>
     result := self.config transport accept: self.listenSocket
     result isOk ifTrue: [
       self onAccepted: result value
     ] ifFalse: [self onAcceptError: result error]
 
-  onAccepted: rawSocket =>
+  onAccepted: rawSocket :: Object -> Nil =>
     self.count := self.count + 1
     Connection
       start: rawSocket
@@ -87,7 +95,14 @@ Server subclass: Acceptor
     // socket, so carry on (spawn_error event in Phase 5).
     self acceptNext
 
-  onAcceptError: reason =>
+  /// `reason` is the transport's bare reason (`Transport`).
+  onAcceptError: reason :: Object -> Nil =>
+    reason =:= #closed
+      ifTrue: [
+        self stop
+        ^nil
+      ]
+    (reason isKindOf: Symbol) ifFalse: [^self unexpected: reason]
     (#(#econnaborted, #einval) includes: reason) ifTrue: [^self acceptNext]
     (Acceptor transientErrors includes: reason) ifTrue: [^self acceptNext]
     (#(#emfile, #enfile) includes: reason)
@@ -95,5 +110,8 @@ Server subclass: Acceptor
         Timer sleep: Acceptor fdExhaustionWait
         ^self acceptNext
       ]
-    reason =:= #closed ifTrue: [^self stop]
+    self unexpected: reason
+
+  /// Anything else is a fault: crash, so the supervisor restarts us.
+  unexpected: reason :: Object -> Nil =>
     Error signal: "Unexpected error in accept: " ++ reason printString

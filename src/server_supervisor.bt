@@ -24,12 +24,12 @@
 /// srv listenerInfo   // => Result ok: {{0, 0, 0, 0}, 54321}
 /// srv stop
 /// ```
-Supervisor subclass: ServerSupervisor
+typed Supervisor subclass: ServerSupervisor
 
-  strategy => #restForOne
+  strategy -> SupervisionStrategy => #restForOne
 
-  childSpecs =>
-    config := self args
+  childSpecs -> List(SupervisionSpec) =>
+    config := self config
     #(((Listener supervisionSpec
       withId: #listener
       withRestart: #transient
@@ -45,30 +45,38 @@ Supervisor subclass: ServerSupervisor
   config -> ServerConfig => self args
 
   /// The listener, or `Result error: #not_listening` while it is stopped.
-  listener -> Result =>
-    (self childWithId: #listener) andThen: [:l |
-      l isNil ifTrue: [Result error: #not_listening] ifFalse: [Result ok: l]
-    ]
+  listener -> Result(Listener, Object) =>
+    found := self childWithId: #listener
+    found isError ifTrue: [^Result error: found error]
+    // `childWithId:` answers Object; the `#listener` child is a Listener.
+    // Annotated `Listener`, not `Listener | Nil`, which is rejected (BT-4042).
+    l :: Listener := found value
+    l isNil ifTrue: [Result error: #not_listening] ifFalse: [Result ok: l]
 
   /// The `{ip, port}` the server listens on (Thousand Island's
   /// `listener_info/1`).
-  listenerInfo -> Result => self listener map: [:l | l listenerInfo]
+  listenerInfo -> Result(Tuple, Object) =>
+    self listener map: [:l | l listenerInfo]
 
   /// The running `AcceptorSupervisor`s, in id order.
-  acceptorSupervisors -> List =>
-    pool := (self childWithId: #acceptorPool) unwrap
-    // `childWithId:` answers Object, so `children` is a DNU hint.
-    @expect dnu
-    pool isNil ifTrue: [#()] ifFalse: [pool children]
+  acceptorSupervisors -> List(AcceptorSupervisor) =>
+    // `Pool`, not `Pool | Nil`, which is rejected (BT-4042); nil while
+    // the pool is restarting.
+    pool :: AcceptorPoolSupervisor := (self childWithId: #acceptorPool) unwrap
+    pool isNil ifTrue: [^#()]
+    // `children` answers List(Object); the pool's children are all
+    // AcceptorSupervisors.
+    kids :: List(AcceptorSupervisor) := pool children
+    kids
 
   /// The pids of every live connection handler (Thousand Island's
   /// `connection_pids/1`). It copies each connection supervisor's child
   /// list, so use it at human timescales, not per request.
-  connectionPids -> Result =>
+  connectionPids -> Result(List(Pid), Error) =>
     pids := #()
     self acceptorSupervisors
       do: [:accSup |
-        connections := (accSup childWithId: #connections) unwrap
+        connections :: ConnectionSupervisor := (accSup childWithId: #connections) unwrap
         connections isNil ifFalse: [
           connections children do: [:h | pids := pids add: h pid]
         ]

@@ -4,7 +4,7 @@
 /// `TestTransport` from `listener_test.exs`: just enough of a transport for
 /// the listener to start, which records the port it was asked to listen on
 /// in a persistent term.
-sealed Object subclass: RecordingTransport
+sealed typed Object subclass: RecordingTransport
 
   class sealed listen: port :: Integer options: _options :: List -> Result =>
     Erlang persistent_term put: #catalinaRecordingTransport with: port

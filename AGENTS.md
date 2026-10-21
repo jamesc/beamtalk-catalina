@@ -112,6 +112,17 @@ Choosing:
 
 Class variables shared by all instances are declared with `classState:`.
 
+## Typing rule
+
+Every catalina class is `typed`, test fixtures included: annotate every
+`state:`/`field:`, parameter and return type, with precise types (unions,
+`Result(T, E)`, `List(Handler)`). New code must build with zero type
+warnings. `beamtalk.toml`'s `[diagnostics]` makes `type`,
+`type-annotation` and `dnu` errors, and `just test` runs
+`--warnings-as-errors`, so CI fails on any warning. Use `@expect` only
+where a Beamtalk limitation forces it, with a comment citing the Linear
+issue. `Handler` is `typed`, so its subclasses are too.
+
 ## Development Workflow
 
 The `.mcp.json` MCP server gives you a live REPL session; Claude Code starts

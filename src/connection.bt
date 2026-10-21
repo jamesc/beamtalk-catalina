@@ -20,7 +20,7 @@
 /// is terminated too.
 ///
 /// A handler is started with `#{#handlerOptions => config handlerOptions}`.
-sealed Object subclass: Connection
+sealed typed Object subclass: Connection
 
   class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Result =>
     startTime := Erlang erlang monotonic_time

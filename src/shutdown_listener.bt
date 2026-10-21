@@ -12,17 +12,23 @@
 /// waiting on its start.
 ///
 /// Args: `#server`, the `ServerSupervisor`. Restart: `#permanent`.
-Actor subclass: ShutdownListener
-  state: server = nil
-  state: listener = nil
+typed Actor subclass: ShutdownListener
+  state: server :: ServerSupervisor
+  // Set by `attach`; nil if the server shuts down before it ran.
+  state: listener :: Listener | Nil = nil
 
-  class supervisionPolicy => #permanent
+  class supervisionPolicy -> RestartStrategy => #permanent
 
-  initialize => self continueWith: #attach
+  initialize -> Nil =>
+    self continueWith: #attach
+    nil
 
-  attach => self.listener := (self.server childWithId: #listener) unwrap
+  attach -> Nil =>
+    self.listener := self.server listener unwrap
+    nil
 
-  terminate: _reason =>
+  terminate: _reason :: Object -> Nil =>
     (self.listener notNil and: [
       self.listener isAlive
     ]) ifTrue: [self.listener stop]
+    nil

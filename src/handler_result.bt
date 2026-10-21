@@ -26,65 +26,72 @@
 /// (HandlerResult close: 3) kind           // => #close
 /// (HandlerResult error: #nope state: 3) reason   // => #nope
 /// ```
-sealed Value subclass: HandlerResult
-  field: kind = #continue
-  field: state = nil
-  field: timeout = nil
-  field: persistent = false
-  field: then = nil
-  field: transport = nil
-  field: options = nil
-  field: reason = nil
+sealed typed Value subclass: HandlerResult
+  field: kind :: #continue | #switchTransport | #close | #error = #continue
+  field: state :: Object = nil
+  // Milliseconds, `#infinity`, or nil for the socket's read timeout.
+  field: timeout :: Integer | #infinity | Nil = nil
+  field: persistent :: Boolean = false
+  // A unary handler method to run next, or nil.
+  field: then :: Symbol | Nil = nil
+  // A class conforming to `Transport`. `Object`, not `Dynamic`, because a
+  // `Dynamic` field with a nil default warns (BT-4032).
+  field: transport :: Object = nil
+  field: options :: Object = nil
+  // The `error:state:` reason: a bare reason or any term.
+  field: reason :: Object = nil
 
   /// Keep reading, with the socket's read timeout.
-  class sealed continue: st -> HandlerResult => self kind: #continue state: st
+  class sealed continue: st :: Object -> HandlerResult =>
+    self kind: #continue state: st
 
   /// Keep reading, timing out after `ms` this time only.
-  class sealed continue: st timeout: ms -> HandlerResult =>
+  class sealed continue: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
     (self kind: #continue state: st) withTimeout: ms
 
   /// Keep reading, and make `ms` the socket's read timeout from now on.
-  class sealed continue: st persistentTimeout: ms -> HandlerResult =>
+  class sealed continue: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
     ((self kind: #continue state: st) withTimeout: ms) withPersistent: true
 
   /// Keep reading, and run the unary method `selector` next.
-  class sealed continue: st then: selector :: Symbol -> HandlerResult =>
+  class sealed continue: st :: Object then: selector :: Symbol -> HandlerResult =>
     (self kind: #continue state: st) withThen: selector
 
   /// Upgrade the connection to `transport` (TLS, say), then keep reading.
-  class sealed switchTransport: transport options: options state: st -> HandlerResult =>
+  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object -> HandlerResult =>
     ((self kind: #switchTransport state: st) withTransport: transport) withOptions: options
 
   /// As `switchTransport:options:state:`, timing out after `ms` this time only.
-  class sealed switchTransport: transport options: options state: st timeout: ms -> HandlerResult =>
+  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
     (self
       switchTransport: transport
       options: options
       state: st) withTimeout: ms
 
   /// As `switchTransport:options:state:`, making `ms` the read timeout from now on.
-  class sealed switchTransport: transport options: options state: st persistentTimeout: ms -> HandlerResult =>
+  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
     ((self
       switchTransport: transport
       options: options
       state: st) withTimeout: ms) withPersistent: true
 
   /// As `switchTransport:options:state:`, then run the unary method `selector`.
-  class sealed switchTransport: transport options: options state: st then: selector :: Symbol -> HandlerResult =>
+  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object then: selector :: Symbol -> HandlerResult =>
     (self
       switchTransport: transport
       options: options
       state: st) withThen: selector
 
   /// Close the connection (`handleClose:state:` runs).
-  class sealed close: st -> HandlerResult => self kind: #close state: st
+  class sealed close: st :: Object -> HandlerResult =>
+    self kind: #close state: st
 
   /// Close the connection with an error (`handleError:socket:state:` runs).
   /// `#timeout` is a read timeout (`handleTimeout:state:` runs instead).
-  class sealed error: reason state: st -> HandlerResult =>
+  class sealed error: reason :: Object state: st :: Object -> HandlerResult =>
     (self kind: #error state: st) withReason: reason
 
-  class sealed kind: kind :: Symbol state: st -> HandlerResult =>
+  class sealed kind: kind :: #continue | #switchTransport | #close | #error state: st :: Object -> HandlerResult =>
     // The keyword constructor, not `new:`, which raises in a direct-called
     // class method (BT-4029).
     HandlerResult

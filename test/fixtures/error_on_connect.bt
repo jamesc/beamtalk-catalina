@@ -4,4 +4,5 @@
 /// `HandleConnection.Error`.
 RecordingHandler subclass: ErrorOnConnect
 
-  handleConnection: _sock state: st => HandlerResult error: #nope state: st
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult error: #nope state: st

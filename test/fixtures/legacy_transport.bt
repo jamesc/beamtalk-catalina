@@ -5,7 +5,7 @@
 /// transport written before `handshake:timeout:` existed would be. The
 /// handshake tags the socket so a test can see which one ran; everything
 /// else delegates to `TCPTransport`. From `socket_test.exs`.
-sealed Object subclass: LegacyTransport
+sealed typed Object subclass: LegacyTransport
 
   class sealed listen: port :: Integer options: options :: List -> Result =>
     TCPTransport listen: port options: options

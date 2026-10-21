@@ -5,11 +5,11 @@
 /// `handleUserInfo:`, not `handleData:socket:state:`.
 RecordingHandler subclass: FakeProxy
 
-  handleConnection: _sock state: st =>
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     Erlang erlang send: self pid msg: {#tcp, #othersocket, "otherdata"}
     HandlerResult continue: st
 
-  handleUserInfo: msg =>
+  handleUserInfo: msg :: Object -> Object =>
     msg match: [
       {#tcp, _other, _data} -> self socket send: "Got other data";
       _ -> nil
