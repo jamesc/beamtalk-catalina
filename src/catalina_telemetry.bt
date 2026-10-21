@@ -98,6 +98,10 @@ sealed typed Value subclass: CatalinaTelemetry
   /// Emit `stop` with `#duration`, unless an `exception` already ended the
   /// span in this process. Answers the span, as every event method does.
   stopWith: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+    // The marker is in the process dictionary, not in the span or a
+    // handler field: `exception` is emitted just before a re-raise, and
+    // state written then is lost to `terminate:`, which emits this `stop`.
+    // Thousand Island's `exception_marker` works the same way.
     (Erlang erlang erase: self exceptionMarker) =:= true ifTrue: [^self]
     now := (measurements at: #monotonic_time ifAbsent: [
       nil
@@ -111,6 +115,8 @@ sealed typed Value subclass: CatalinaTelemetry
   /// Emit `exception` (once per span and process) with `#duration`, `kind`,
   /// `reason` and `stacktrace`.
   exceptionKind: kind :: Symbol reason: reason :: Object stacktrace: stacktrace :: Object -> CatalinaTelemetry =>
+    // In the process dictionary because the caller re-raises next, which
+    // discards any state written now (see `stopWith:metadata:`).
     (Erlang erlang put: self exceptionMarker with: true) =:= true ifTrue: [
       ^self
     ]
