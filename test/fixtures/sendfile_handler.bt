@@ -7,25 +7,30 @@
 typed Actor subclass: SendfileHandler
   // Set once by `sendfile:path:`, which the test casts before reading them.
   late state: sent :: Result
-  late state: monitoredBefore :: List
-  late state: monitoredAfter :: List
+  late state: fileMonitorsBefore :: List
+  late state: fileMonitorsAfter :: List
 
   /// Send the file and close the connection. Cast this with `!`.
   sendfile: sock :: Socket path: path :: String -> Result =>
-    self.monitoredBefore := self monitoredBy
+    self.fileMonitorsBefore := self fileMonitors
     self.sent := sock
       sendfile: path
       offset: 0
       length: 0
-    self.monitoredAfter := self monitoredBy
+    self.fileMonitorsAfter := self fileMonitors
     sock close
 
   /// The `sendfile:offset:length:` result.
   sent -> Result => self.sent
 
-  /// This process's `monitored_by` list.
-  monitoredBy -> List =>
-    (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
+  /// The non-process entries of this process's `monitored_by` list: an open
+  /// raw file monitors its owner as a NIF resource. Processes are left out,
+  /// because the runtime's trace store starts monitoring an actor after its
+  /// first message, asynchronously, so it can appear mid-send.
+  fileMonitors -> List =>
+    ((Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2) reject: [:m |
+      m isKindOf: Pid
+    ]
 
-  /// Whether sending left no new monitor behind (the file was closed).
-  closedFile -> Boolean => self.monitoredBefore =:= self.monitoredAfter
+  /// Whether sending left no file monitor behind (the file was closed).
+  closedFile -> Boolean => self.fileMonitorsBefore =:= self.fileMonitorsAfter
