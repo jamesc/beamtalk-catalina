@@ -11,7 +11,11 @@
 %%
 %%   erl -noshell -pa _build/bench/ebin -s bench_main main -extra \
 %%       [--rounds 5] [--duration 5000] [--warmup 1000] [--rows full|smoke]
-%%       [--only ROWID,...] [--out DIR] [--max-load L]
+%%       [--only ROWID,...] [--out DIR] [--max-load L] [--ab-trace-store]
+%%
+%% With `--ab-trace-store`, a third peer runs Catalina with the Beamtalk
+%% trace store's telemetry handlers detached (`catalina_notrace`), measured
+%% in the same rounds, and the report adds what the trace store costs.
 %%
 %% With `--max-load L`, each round waits (up to 30 minutes) until the
 %% 1-minute load average is below L, so a shared machine is measured when
@@ -23,7 +27,7 @@
 main() ->
     Opts = parse(init:get_plain_arguments(), #{
         rounds => 5, duration => 5000, warmup => 1000, rows => full,
-        only => [], max_load => undefined,
+        only => [], max_load => undefined, ab_trace_store => false,
         out => filename:join([os:getenv("BENCH_ROOT"), "_build", "bench"])
     }),
     try run(Opts) of
@@ -41,6 +45,7 @@ parse(["--rows", R | T], O) -> parse(T, O#{rows => list_to_atom(R)});
 parse(["--only", R | T], O) -> parse(T, O#{only => string:split(R, ",", all)});
 parse(["--out", D | T], O) -> parse(T, O#{out => D});
 parse(["--max-load", L | T], O) -> parse(T, O#{max_load => list_to_number(L)});
+parse(["--ab-trace-store" | T], O) -> parse(T, O#{ab_trace_store => true});
 parse([], O) -> O;
 parse([X | _], _) -> error({unknown_argument, X}).
 
@@ -83,7 +88,8 @@ run(Opts = #{rounds := Rounds, out := Out}) ->
     Env = environment(),
     log("bench: ~p rounds, ~p rows, ~p ms per measurement; ~s~n",
         [Rounds, length(Rows), maps:get(duration, Opts), load()]),
-    Peers = maps:from_list([{I, bench_peer:start(I)} || I <- bench_peer:impls()]),
+    Impls = impls(Opts),
+    Peers = maps:from_list([{I, bench_peer:start(I)} || I <- Impls]),
     PerRound = [round(R, Rows, Peers, Opts, Raw) || R <- lists:seq(1, Rounds)],
     Results = lists:append([Rs || {_, _, Rs} <- PerRound]),
     [bench_peer:stop(P) || P <- maps:values(Peers)],
@@ -97,11 +103,17 @@ run(Opts = #{rounds := Rounds, out := Out}) ->
     log("~nraw: ~s~nreport: ~s~n", [RawFile, ReportFile]),
     ok.
 
+impls(#{ab_trace_store := true}) -> [catalina, ti, catalina_notrace];
+impls(_) -> [catalina, ti].
+
 select(Rows, []) -> Rows;
 select(Rows, Only) -> [R || R = {Id, _, _} <- Rows, lists:member(Id, Only)].
 
 round(R, Rows, Peers, Opts, Raw) ->
-    Order = case R rem 2 of 1 -> [catalina, ti]; 0 -> [ti, catalina] end,
+    Base = impls(Opts),
+    %% Rotate the order each round so no implementation always goes first.
+    Shift = (R - 1) rem length(Base),
+    Order = lists:nthtail(Shift, Base) ++ lists:sublist(Base, Shift),
     wait_for_quiet(maps:get(max_load, Opts), erlang:monotonic_time(second) + 1800),
     Load = load(),
     log("round ~p (~s)~n", [R, Load]),
@@ -172,9 +184,13 @@ settled_stats(Peer, Prev, Tries) ->
 watched() -> [beamtalk_trace_store].
 
 watched_metrics(W) ->
-    maps:fold(fun(Name, #{peak_queue := Q, reductions := R, seconds := S}, Acc) ->
-        Acc#{list_to_atom(atom_to_list(Name) ++ "_peak_queue") => Q,
-             list_to_atom(atom_to_list(Name) ++ "_reductions_per_s") => R / max(S, 0.001)}
+    maps:fold(fun(Name, #{peak_queue := Q, p99_queue := Q99, reductions := R,
+                          reduction_share := Share, seconds := S}, Acc) ->
+        K = fun(Suffix) -> list_to_atom(atom_to_list(Name) ++ Suffix) end,
+        Acc#{K("_peak_queue") => Q,
+             K("_p99_queue") => Q99,
+             K("_reductions_per_s") => R / max(S, 0.001),
+             K("_reduction_share_pct") => 100 * Share}
     end, #{}, W).
 
 brief(echo, #{msgs_per_s := M, p50 := P50, p99 := P99, errors := E}) ->
@@ -218,7 +234,9 @@ metrics(echo) ->
 metrics(churn) ->
     [{msgs_per_s, "conn/s", higher}, {p50, "p50 µs", lower}, {p99, "p99 µs", lower},
      {beamtalk_trace_store_peak_queue, "trace store peak mailbox", lower},
-     {beamtalk_trace_store_reductions_per_s, "trace store reductions/s", lower}];
+     {beamtalk_trace_store_p99_queue, "trace store p99 mailbox", lower},
+     {beamtalk_trace_store_reductions_per_s, "trace store reductions/s", lower},
+     {beamtalk_trace_store_reduction_share_pct, "trace store % of node reductions", lower}];
 metrics(idle) ->
     [{bytes_per_conn, "node bytes/conn", lower},
      {handler_bytes_per_conn, "handler bytes/conn", lower},
@@ -242,7 +260,30 @@ report(Rows, Results, Env) ->
          maps:get(rounds, maps:get(opts, Env)), maps:get(duration, maps:get(opts, Env)),
          maps:get(warmup, maps:get(opts, Env)), maps:get(load, Env), maps:get(finished_load, Env)]),
     Lines = [row_lines(Id, Kind, Results) || {Id, Kind, _} <- Rows],
-    [Header, Lines].
+    [Header, Lines, ab_trace_store(Rows, Results)].
+
+%% Catalina against Catalina with the trace store detached, when measured.
+ab_trace_store(Rows, Results) ->
+    case [x || {_, catalina_notrace, _} <- Results] of
+        [] -> [];
+        _ ->
+            ["\n## Trace store A/B\n\n"
+             "Catalina as shipped against Catalina with the Beamtalk trace store's "
+             "telemetry handlers detached, in the same rounds. Cost is how much "
+             "faster the detached node is on the row's main throughput metric.\n\n"
+             "| Row | Catalina | Catalina, trace store detached | Trace store cost |\n"
+             "|---|---:|---:|---:|\n",
+             [begin
+                  With = median(values(Id, catalina, msgs_per_s, Results)),
+                  Without = median(values(Id, catalina_notrace, msgs_per_s, Results)),
+                  io_lib:format("| ~s | ~s | ~s | ~s |~n",
+                                [Id, fmt(msgs_per_s, With), fmt(msgs_per_s, Without), cost(With, Without)])
+              end || {Id, Kind, _} <- Rows, Kind =/= idle]]
+    end.
+
+cost(With, Without) when is_number(With), is_number(Without), Without > 0 ->
+    io_lib:format("~.1f%", [100 * (Without - With) / Without]);
+cost(_, _) -> "-".
 
 row_lines(Id, Kind, Results) ->
     [begin

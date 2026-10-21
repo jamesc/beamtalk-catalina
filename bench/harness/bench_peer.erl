@@ -3,6 +3,8 @@
 
 %% @doc Start a server peer node: a separate BEAM VM running either Catalina
 %% (`catalina`) or Thousand Island (`ti`), driven over the peer control
+%% channel. `catalina_notrace` is Catalina with the Beamtalk trace store's
+%% telemetry handlers detached, for an A/B of what the trace store costs
 %% channel (standard_io, so no epmd or distribution). The load generator
 %% runs in the calling VM, so client and server never share schedulers.
 %%
@@ -46,6 +48,8 @@ code_paths(Impl) ->
     Harness = filename:join([Root, "_build", "bench", "ebin"]),
     [Harness | impl_paths(Impl, Root)].
 
+impl_paths(catalina_notrace, Root) ->
+    impl_paths(catalina, Root);
 impl_paths(catalina, Root) ->
     Lib = env("BENCH_BEAMTALK_LIB"),
     Node = filename:join([Root, "bench", "catalina_node", "_build"]),

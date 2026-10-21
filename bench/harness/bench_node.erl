@@ -49,11 +49,17 @@
 %% === Boot ===
 
 boot(Impl, Log) ->
-    persistent_term:put({?MODULE, impl}, Impl),
+    persistent_term:put({?MODULE, impl}, base(Impl)),
     configure_logger(Log),
     {ok, _} = application:ensure_all_started(ssl),
     boot(Impl).
 
+base(catalina_notrace) -> catalina;
+base(I) -> I.
+
+boot(catalina_notrace) ->
+    ok = boot(catalina),
+    detach_trace_store();
 boot(catalina) ->
     {ok, _} = application:ensure_all_started(beamtalk_stdlib),
     {ok, _} = application:ensure_all_started(catalina_node),
@@ -324,6 +330,13 @@ gc_all() ->
     [erlang:garbage_collect(P) || P <- erlang:processes()],
     ok.
 
+%% Detach the Beamtalk trace store's telemetry handlers, so actor dispatch
+%% and lifecycle events no longer reach it (its aggregates are always on;
+%% `beamtalk_trace_store:disable/0` only gates trace events).
+detach_trace_store() ->
+    [telemetry:detach(Id) || Id <- beamtalk_trace_store:telemetry_handler_ids()],
+    ok.
+
 %% === Watching node-wide processes ===
 
 %% Sample the registered processes `Names` every 5 ms until `watch_stop/0`:
@@ -333,11 +346,14 @@ watch_start(Names) ->
     watch_stop(),
     Pids = [{N, P} || N <- Names, P <- [whereis(N)], is_pid(P)],
     Start = [{N, reds(P)} || {N, P} <- Pids],
-    W = spawn(fun() -> watch_loop(Pids, Start, #{}) end),
+    {NodeReds0, _} = erlang:statistics(reductions),
+    W = spawn(fun() -> watch_loop(Pids, Start, #{}, NodeReds0) end),
     persistent_term:put({?MODULE, watcher}, W),
     ok.
 
-%% Answers #{Name => #{peak_queue, reductions, seconds}}.
+%% Answers #{Name => #{peak_queue, p99_queue, reductions, reduction_share,
+%% seconds}}: `reduction_share` is the process's share of all reductions
+%% in the node over the window, a stand-in for its CPU share.
 watch_stop() ->
     case persistent_term:get({?MODULE, watcher}, undefined) of
         undefined -> #{};
@@ -348,27 +364,36 @@ watch_stop() ->
             receive {Ref, R} -> R after 5000 -> #{} end
     end.
 
-watch_loop(Pids, Start, Peaks) ->
+watch_loop(Pids, Start, Samples, NodeReds0) ->
     T0 = erlang:monotonic_time(millisecond),
-    watch_loop(Pids, Start, Peaks, T0).
+    watch_loop(Pids, Start, Samples, T0, NodeReds0).
 
-watch_loop(Pids, Start, Peaks, T0) ->
+watch_loop(Pids, Start, Samples, T0, NodeReds0) ->
+    %% Raised priority, so a loaded node still samples on time.
+    process_flag(priority, high),
     receive
         {stop, From, Ref} ->
             Secs = (erlang:monotonic_time(millisecond) - T0) / 1000,
-            From ! {Ref, maps:from_list([{N, #{peak_queue => maps:get(N, Peaks, 0),
-                                              reductions => reds(P) - proplists:get_value(N, Start),
-                                              seconds => Secs}}
-                                         || {N, P} <- Pids])}
+            {NodeReds1, _} = erlang:statistics(reductions),
+            NodeReds = max(1, NodeReds1 - NodeReds0),
+            From ! {Ref, maps:from_list([begin
+                Qs = lists:sort(maps:get(N, Samples, [0])),
+                R = reds(P) - proplists:get_value(N, Start),
+                {N, #{peak_queue => lists:last(Qs),
+                      p99_queue => lists:nth(max(1, ceil(length(Qs) * 0.99)), Qs),
+                      reductions => R,
+                      reduction_share => R / NodeReds,
+                      seconds => Secs}}
+            end || {N, P} <- Pids])}
     after 5 ->
-        Peaks1 = lists:foldl(fun({N, P}, Acc) ->
+        Samples1 = lists:foldl(fun({N, P}, Acc) ->
             Q = case erlang:process_info(P, message_queue_len) of
                 {message_queue_len, L} -> L;
                 _ -> 0
             end,
-            maps:update_with(N, fun(X) -> max(X, Q) end, Q, Acc)
-        end, Peaks, Pids),
-        watch_loop(Pids, Start, Peaks1, T0)
+            maps:update_with(N, fun(X) -> [Q | X] end, [Q], Acc)
+        end, Samples, Pids),
+        watch_loop(Pids, Start, Samples1, T0, NodeReds0)
     end.
 
 reds(P) ->
