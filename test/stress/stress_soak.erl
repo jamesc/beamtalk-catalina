@@ -7,9 +7,15 @@
 %% all checked byte for byte. The server node is sampled throughout.
 %%
 %% Passes when there are no corrupted bytes or client errors, the process
-%% count and memory do not grow (the last third of the samples against the
-%% first third, after a warm-up sample), and once the load stops the
-%% process, port and ETS counts return to the baseline taken before it.
+%% count and the memory floor do not grow (the last third of the samples
+%% against the first third, after a warm-up sample), and once the load
+%% stops the process, port and ETS counts return to the baseline taken
+%% before it and memory settles back near it.
+%%
+%% Memory under load swings with whatever is in flight (handler heaps,
+%% refc binaries: 100-350 MiB within a minute at full rate), so the trend
+%% check compares the *floor* (the lowest sample) of each third: retained
+%% memory raises the floor, in-flight memory does not.
 -module(stress_soak).
 
 -export([tests/0]).
@@ -58,18 +64,25 @@ judge(Base, After, Samples, Errors, Minutes) ->
     Avg = fun(K, L) -> lists:sum([maps:get(K, S) || S <- L]) / length(L) end,
     Max = fun(K, L) -> lists:max([maps:get(K, S) || S <- L]) end,
     ProcGrowth = Max(processes, Last) - Max(processes, First),
-    MemFirst = Avg(memory, First),
-    MemLast = Avg(memory, Last),
+    Min = fun(K, L) -> lists:min([maps:get(K, S) || S <- L]) end,
+    MemFirst = Min(memory, First),
+    MemLast = Min(memory, Last),
     stress_lib:check(ProcGrowth =< 50, "process count does not grow", {Max(processes, First), Max(processes, Last)}),
-    stress_lib:check(MemLast =< MemFirst * 1.10 + 16 * 1048576, "memory does not grow",
+    stress_lib:check(MemLast =< MemFirst * 1.10 + 16 * 1048576, "the memory floor does not grow",
                      {round(MemFirst), round(MemLast)}),
+    Settled = maps:get(memory, After),
+    stress_lib:check(Settled =< maps:get(memory, Base) * 1.10 + 16 * 1048576,
+                     "memory settles back to the baseline after the load",
+                     {maps:get(memory, Base), Settled}),
     Diff = maps:from_list([{K, {maps:get(K, Base), maps:get(K, After)}}
                            || K <- ?KEYS, maps:get(K, Base) =/= maps:get(K, After)]),
     stress_lib:check(Diff =:= #{}, "processes, ports and ETS back to baseline", Diff),
     stress_lib:check_ets_rows(Base, After, Ok),
     #{minutes => Minutes, samples => length(Samples), echoes => Ok,
       processes_first_last => {Max(processes, First), Max(processes, Last)},
-      memory_mib_first_last => {round(MemFirst / 1048576), round(MemLast / 1048576)}}.
+      memory_floor_mib_first_last => {round(MemFirst / 1048576), round(MemLast / 1048576)},
+      memory_mib_base_settled => {round(maps:get(memory, Base) / 1048576), round(Settled / 1048576)},
+      avg_memory_mib_first_last => {round(Avg(memory, First) / 1048576), round(Avg(memory, Last) / 1048576)}}.
 
 sample(Ctx, Deadline, Interval, Acc) ->
     S = stress_lib:stats(Ctx),
