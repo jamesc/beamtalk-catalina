@@ -15,9 +15,8 @@
 /// `peername` answers the address captured when the connection was
 /// accepted, so it still works after the client has reset the connection.
 ///
-/// Telemetry span events (`recv`, `send`, `sendfile`, their `_error`
-/// forms and `socket_shutdown`) are added in Phase 5; until then `span` is
-/// carried but not used.
+/// `recv:...`, `send:`, `sendfile:...` and `shutdown:` emit their
+/// telemetry events on the connection span (see `CatalinaTelemetry`).
 ///
 /// ## Examples
 /// ```beamtalk
@@ -35,12 +34,12 @@ sealed typed Value subclass: Socket
   field: handshakeTimeout :: Integer | #infinity = 5000
   field: peername :: Tuple | Nil = nil
   field: silentTerminateOnError :: Boolean = false
-  // The connection telemetry span (Phase 5).
-  field: span :: Object = nil
+  // The connection telemetry span; nil for a Socket made outside a server.
+  field: span :: CatalinaTelemetry | Nil = nil
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
-  class sealed wrap: rawSocket :: Object peername: peer :: Object handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Socket =>
+  class sealed wrap: rawSocket :: Object peername: peer :: Object handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
     Socket
       socket: rawSocket
       transport: handlerConfig transport
@@ -75,25 +74,64 @@ sealed typed Value subclass: Socket
   recv: length :: Integer -> Result => self recv: length timeout: nil
 
   /// Up to `length` bytes, waiting at most `timeout` ms (`nil`: `readTimeout`).
+  /// Emits `recv` (`#data`) or `recv_error` (`#error`).
   recv: length :: Integer timeout: timeout :: Object -> Result =>
-    self.transport
+    result := self.transport
       recv: self.socket
       length: length
       timeout: (timeout ifNil: [self.readTimeout])
+    result isOk ifTrue: [
+      self untimed: #recv measurements: #{#data => result value}
+    ] ifFalse: [self event: #recv_error measurements: #{#error => result error}]
+    result
 
-  /// Send a String or iodata.
-  send: data :: Object -> Result => self.transport send: self.socket data: data
+  /// Send a String or iodata. Emits `send` (`#data`) or `send_error`
+  /// (`#data`, `#error`).
+  send: data :: Object -> Result =>
+    result := self.transport send: self.socket data: data
+    result isOk ifTrue: [
+      self untimed: #send measurements: #{#data => data}
+    ] ifFalse: [
+      self event: #send_error measurements: #{
+        #data => data,
+        #error => result error
+      }
+    ]
+    result
 
-  /// Send `length` bytes of the file at `filename` from `offset` (0: to the end).
+  /// Send `length` bytes of the file at `filename` from `offset` (0: to the
+  /// end). Emits `sendfile` (`#filename`, `#offset`, `#bytes_written`) or
+  /// `sendfile_error` (`#filename`, `#offset`, `#length`, `#error`).
   sendfile: filename :: String offset: offset :: Integer length: length :: Integer -> Result =>
-    self.transport
+    result := self.transport
       sendfile: self.socket
       filename: filename
       offset: offset
       length: length
+    result isOk
+      ifTrue: [
+        self untimed: #sendfile measurements: #{
+          #filename => filename,
+          #offset => offset,
+          #bytes_written => result value
+        }
+      ]
+      ifFalse: [
+        self
+          event: #sendfile_error
+          measurements: #{
+            #filename => filename,
+            #offset => offset,
+            #length => length,
+            #error => result error
+          }
+      ]
+    result
 
-  /// Shut the connection down in one direction: `#read`, `#write` or `#read_write`.
+  /// Shut the connection down in one direction: `#read`, `#write` or
+  /// `#read_write`. Emits `socket_shutdown` (`#way`).
   shutdown: way :: Symbol -> Result =>
+    self event: #socket_shutdown measurements: #{#way => way}
     self.transport shutdown: self.socket how: way
 
   /// Close the connection. The handler that owns it also closes it when it exits.
@@ -129,5 +167,30 @@ sealed typed Value subclass: Socket
   connectionInformation -> Result =>
     self.transport connectionInformation: self.socket
 
-  /// The telemetry span covering this connection.
-  telemetrySpan -> Object => self.span
+  /// The telemetry span covering this connection (nil outside a server).
+  telemetrySpan -> CatalinaTelemetry | Nil => self.span
+
+  /// An event on the connection span, with the time (`span_event/4`).
+  event: name :: Symbol measurements: measurements :: Dictionary -> Nil =>
+    span := self.span
+    span isNil
+      ifFalse: [
+        span
+          event: name
+          measurements: measurements
+          metadata: #{}
+      ]
+    nil
+
+  /// An event on the connection span, without the time
+  /// (`untimed_span_event/4`).
+  untimed: name :: Symbol measurements: measurements :: Dictionary -> Nil =>
+    span := self.span
+    span isNil
+      ifFalse: [
+        span
+          untimedEvent: name
+          measurements: measurements
+          metadata: #{}
+      ]
+    nil

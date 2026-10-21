@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Telemetry.DataException` from `handler_test.exs`.
+Handler subclass: TelemetryDataRaiser
+
+  handleData: _data :: Object socket: _sock :: Socket state: _st :: Object -> HandlerResult =>
+    Error signal: "data nope"

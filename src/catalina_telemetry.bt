@@ -1,0 +1,150 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// CatalinaTelemetry — a telemetry span and its events, as Thousand Island's
+/// `ThousandIsland.Telemetry`, emitted with the stdlib `Telemetry` facade.
+///
+/// Catalina emits ordinary `telemetry` events named `[catalina, Span,
+/// Event]`, so any `telemetry` handler (Erlang, Elixir, `Telemetry attach:`)
+/// sees them. There are three spans, each a child of the one before:
+///
+/// | Span | Start/stop | Events |
+/// |---|---|---|
+/// | `#listener` | the listener opens/closes its sockets | |
+/// | `#acceptor` | an acceptor starts/stops (`#connections` count) | `spawn_error`, `econnaborted`, `accept_error`, `emfile` |
+/// | `#connection` | a connection is accepted/closed (`getstat` counters) | `ready`, `async_recv`, `recv`, `recv_error`, `send`, `send_error`, `sendfile`, `sendfile_error`, `socket_shutdown`, `exception` |
+///
+/// `start` events carry `#monotonic_time` and `#system_time`; `stop` and
+/// `exception` add `#duration`. Every event's metadata has
+/// `#telemetry_span_context` (a Reference), `#handler` (the server's handler
+/// class) and, on a child span's start, `#parent_telemetry_span_context`.
+/// A span is not a block: it starts in one message and stops in another, so
+/// it uses `Telemetry execute:...`, not `Telemetry span:...`.
+///
+/// An `exception` event ends the span: a later `stop` in the same process is
+/// skipped (a process-dictionary marker, as Thousand Island's).
+///
+/// ## Examples
+/// ```beamtalk
+/// span := CatalinaTelemetry startSpan: #listener measurements: #{} metadata: #{#handler => EchoHandler}
+/// span event: #ready measurements: #{} metadata: #{}
+/// span stop
+/// ```
+sealed typed Value subclass: CatalinaTelemetry
+  field: spanName :: Symbol = #listener
+  field: telemetrySpanContext :: Reference | Nil = nil
+  field: startTime :: Integer = 0
+  field: startMetadata :: Dictionary = #{}
+  field: handler :: Object = nil
+  field: spanMetadata :: Dictionary = #{}
+
+  /// Native monotonic time, as `telemetry` expects.
+  class sealed monotonicTime -> Integer => Erlang erlang monotonic_time
+
+  /// Native system time.
+  class sealed systemTime -> Integer => Erlang erlang system_time
+
+  /// Emit `[catalina, span, name]`.
+  class sealed emit: span :: Symbol name: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+    Telemetry
+      execute: ((#(#catalina) add: span) add: name)
+      measurements: measurements
+      metadata: metadata
+
+  /// Start a span: emit its `start` event and answer it. `measurements`
+  /// may supply `#monotonic_time` and `#system_time`; otherwise they are
+  /// now. `metadata` should name the `#handler`.
+  class sealed startSpan: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+    timed := (measurements includesKey: #monotonic_time) ifTrue: [
+      measurements
+    ] ifFalse: [measurements at: #monotonic_time put: self monotonicTime]
+    timed := (timed includesKey: #system_time) ifTrue: [
+      timed
+    ] ifFalse: [timed at: #system_time put: self systemTime]
+    context := Erlang erlang make_ref
+    start := metadata at: #telemetry_span_context put: context
+    self
+      emit: name
+      name: #start
+      measurements: timed
+      metadata: start
+    handler := start at: #handler ifAbsent: [nil]
+    startTime :: Integer := timed at: #monotonic_time
+    CatalinaTelemetry
+      spanName: name
+      telemetrySpanContext: context
+      startTime: startTime
+      startMetadata: start
+      handler: handler
+      spanMetadata: #{#telemetry_span_context => context, #handler => handler}
+
+  /// Start a child span of this one (`start_child_span/4`).
+  startChild: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+    CatalinaTelemetry
+      startSpan: name
+      measurements: measurements
+      metadata: ((metadata at: #parent_telemetry_span_context put: self.telemetrySpanContext) at: #handler put: self.handler)
+
+  /// Start a child span with no extra measurements or metadata.
+  startChild: name :: Symbol -> CatalinaTelemetry =>
+    self
+      startChild: name
+      measurements: #{}
+      metadata: #{}
+
+  /// Stop the span (`stop_span/3`) with no extra measurements or metadata.
+  stop -> Nil => self stopWith: #{} metadata: #{}
+
+  /// Emit `stop` with `#duration`, unless an `exception` already ended the
+  /// span in this process.
+  stopWith: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+    (Erlang erlang erase: self exceptionMarker) =:= true ifTrue: [^nil]
+    now := (measurements at: #monotonic_time ifAbsent: [
+      nil
+    ]) ifNil: [CatalinaTelemetry monotonicTime]
+    timed := (measurements at: #monotonic_time put: now) at: #duration put: now - self.startTime
+    self
+      untimedEvent: #stop
+      measurements: timed
+      metadata: (self.startMetadata merge: metadata)
+
+  /// Emit `exception` (once per span and process) with `#duration`, `kind`,
+  /// `reason` and `stacktrace`.
+  exceptionKind: kind :: Symbol reason: reason :: Object stacktrace: stacktrace :: Object -> Nil =>
+    (Erlang erlang put: self exceptionMarker with: true) =:= true ifTrue: [^nil]
+    now := CatalinaTelemetry monotonicTime
+    metadata := self.startMetadata merge: #{
+      #kind => kind,
+      #reason => reason,
+      #stacktrace => stacktrace
+    }
+    self
+      untimedEvent: #exception
+      measurements: #{#monotonic_time => now, #duration => now - self.startTime}
+      metadata: metadata
+
+  /// An event that adds `#monotonic_time` (`span_event/4`).
+  event: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+    timed := (measurements includesKey: #monotonic_time) ifTrue: [
+      measurements
+    ] ifFalse: [
+      measurements at: #monotonic_time put: CatalinaTelemetry monotonicTime
+    ]
+    self
+      untimedEvent: name
+      measurements: timed
+      metadata: metadata
+
+  /// An event with the span's context and handler in its metadata
+  /// (`untimed_span_event/4`).
+  untimedEvent: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+    CatalinaTelemetry
+      emit: self.spanName
+      name: name
+      measurements: measurements
+      metadata: (metadata merge: self.spanMetadata)
+
+  /// The process-dictionary key marking that this span ended with an
+  /// exception.
+  exceptionMarker -> Tuple =>
+    {#catalina_exception_emitted, self.telemetrySpanContext}

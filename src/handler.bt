@@ -162,7 +162,7 @@ typed Server subclass: Handler
       _ -> self handleUserInfo: msg
     ]
 
-  onReady: raw :: Object config: config :: HandlerConfig span: span :: Object start: _start :: Integer -> Nil =>
+  onReady: raw :: Object config: config :: HandlerConfig span: acceptorSpan :: CatalinaTelemetry | Nil start: start :: Integer -> Nil =>
     transport := config transport
     peer := transport peername: raw
     peer isError
@@ -172,10 +172,22 @@ typed Server subclass: Handler
         self stopWith: {#shutdown, {#premature_conn_closing, peer error}}
         ^nil
       ]
-    Erlang proc_lib set_label: {#catalina_connection, peer value}
+    remote :: Tuple := peer value
+    Erlang proc_lib set_label: {#catalina_connection, remote}
+    span := acceptorSpan isNil
+      ifTrue: [nil]
+      ifFalse: [
+        acceptorSpan
+          startChild: #connection
+          measurements: #{#monotonic_time => start}
+          metadata: #{
+            #remote_address => (remote at: 1),
+            #remote_port => (remote at: 2)
+          }
+      ]
     sock := Socket
       wrap: raw
-      peername: peer value
+      peername: remote
       handlerConfig: config
       span: span
     shaken := sock handshake
@@ -187,17 +199,28 @@ typed Server subclass: Handler
         ^nil
       ]
     self.socket := shaken value
+    span isNil
+      ifFalse: [
+        span
+          event: #ready
+          measurements: #{}
+          metadata: #{}
+      ]
     // A continuation, so the socket is in state before the callback runs
     // and a raise in it still closes the socket in `terminate:`.
     self continueWith: #runHandleConnection
     nil
 
-  // Phase 5 wraps the two callback calls below in an inline `on:do:` that
+  // The two callback calls below are wrapped in an inline `on:do:` that
   // emits the span's `exception` event and re-raises (Thousand Island's
-  // `invoke_callback/2`). A block handed to a helper method could not
-  // keep the callback's field writes (ADR 0133), so it stays inline.
+  // `invoke_callback/2`). A block handed to a helper method could not keep
+  // the callback's field writes (ADR 0133), so each one is inline.
   runHandleConnection -> Nil =>
-    self handleContinuation: (self handleConnection: self.socket state: self.userState)
+    sock := self.socket
+    result := [
+      self handleConnection: sock state: self.userState
+    ] on: Exception do: [:e | self raised: e on: sock]
+    self handleContinuation: result
 
   // A socket message for another socket, or one before the ready message,
   // goes to `handleUserInfo:`.
@@ -207,11 +230,14 @@ typed Server subclass: Handler
         sock := self.socket
         raw =:= sock socket
           ifTrue: [
-            ^self
-              handleContinuation: (self
+            sock untimed: #async_recv measurements: #{#data => data}
+            result := [
+              self
                 handleData: data
                 socket: sock
-                state: self.userState)
+                state: self.userState
+            ] on: Exception do: [:e | self raised: e on: sock]
+            ^self handleContinuation: result
           ]
       ]
     self handleUserInfo: msg
@@ -229,6 +255,25 @@ typed Server subclass: Handler
       raw =:= self.socket socket ifTrue: [^self stopWith: reason]
     ]
     self handleUserInfo: msg
+
+  /// A callback raised: emit `exception` on the connection span (which
+  /// ends it), then re-raise, so the handler crashes as in Elixir.
+  raised: error :: Exception on: sock :: Socket -> Never =>
+    span := sock telemetrySpan
+    span isNil
+      ifFalse: [
+        kind := (error isKindOf: ExitError) ifTrue: [
+          #exit
+        ] ifFalse: [
+          (error isKindOf: ThrowError) ifTrue: [#throw] ifFalse: [#error]
+        ]
+        reason := kind =:= #error ifTrue: [error] ifFalse: [error reason]
+        span
+          exceptionKind: kind
+          reason: reason
+          stacktrace: error stackTrace
+      ]
+    error signal
 
   // === Continuations ===
 
@@ -403,8 +448,33 @@ typed Server subclass: Handler
     ]
     self close: sock reason: closeReason
 
-  /// Close the socket. Phase 5 stops the connection span here with the
-  /// `getstat` counters and, unless `closeReason` is a clean one, the error.
-  close: sock :: Socket reason: _closeReason :: Object -> Nil =>
+  /// Close the socket and stop the connection span with the `getstat`
+  /// counters and, unless `closeReason` is a clean one, `#error`
+  /// (`do_socket_close/2`).
+  close: sock :: Socket reason: closeReason :: Object -> Nil =>
+    span := sock telemetrySpan
+    stats := sock getstat
     sock close
+    span isNil
+      ifFalse: [
+        counters := stats isOk ifTrue: [
+          self counters: stats value
+        ] ifFalse: [#{}]
+        clean := #(#shutdown, #local_closed, #peer_closed) anySatisfy: [:r |
+          r =:= closeReason
+        ]
+        span stopWith: counters metadata: (clean ifTrue: [
+          #{}
+        ] ifFalse: [#{#error => closeReason}])
+      ]
     nil
+
+  /// The `send_oct`, `send_cnt`, `recv_oct` and `recv_cnt` of a `getstat`
+  /// answer.
+  counters: stats :: List -> Dictionary =>
+    result := #{}
+    #(#send_oct, #send_cnt, #recv_oct, #recv_cnt)
+      do: [:key |
+        result := result at: key put: (Erlang proplists get_value: key with: stats)
+      ]
+    result

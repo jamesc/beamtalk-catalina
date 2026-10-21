@@ -8,8 +8,8 @@
 ///   `error:state:`;
 /// - the `{socket, userState}` state shape (`socket`, `userState`);
 /// - the `Socket` calls Bandit's `SocketHelpers` and handlers make;
-/// - `Socket readTimeout`; `Socket telemetrySpan` (its contents are
-///   checked after Phase 5);
+/// - `Socket readTimeout`; `Socket telemetrySpan` and its
+///   `telemetrySpanContext`, the connection span's;
 /// - the option names (`ServerConfig optionNames`);
 /// - `listenerInfo` (`ThousandIsland.listener_info/1`);
 /// - a delegating handler that switches protocols and forwards sync calls,
@@ -147,11 +147,23 @@ TestCase subclass: SurfaceTest
     info := (HandlerHarness serverIn: self tableName) listenerInfo unwrap
     self assert: info equals: {{0, 0, 0, 0}, port}
 
-  // ===== telemetry span (contents verified after Phase 5) =====
-  testSocketCarriesItsTelemetrySpan =>
-    sock := Socket
-      wrap: #unused
-      peername: {{1, 2, 3, 4}, 5}
-      handlerConfig: HandlerConfig new
-      span: #span
-    self assert: sock telemetrySpan equals: #span
+  // ===== telemetry span =====
+  testSocketTelemetrySpanIsTheConnectionSpan =>
+    // Bandit reads `Socket.telemetry_span(socket)` and its
+    // `telemetry_span_context` to parent its own request spans.
+    TelemetryCollector attachAll: DelegatingHandler table: self tableName
+    port := self start: DelegatingHandler options: #{
+      #handlerOptions => #{#delegate => UpperProtocol}
+    }
+    client := self connect: port
+    self send: "x" to: client
+    self assert: (self recv: client) equals: "X"
+    span :: CatalinaTelemetry := self handler socket telemetrySpan
+    self assert: span spanName equals: #connection
+    start := TelemetryCollector
+      await: #connection
+      named: #start
+      in: self tableName
+    startMetadata :: Dictionary := start at: 3
+    self assert: span telemetrySpanContext equals: (startMetadata at: #telemetry_span_context)
+    TelemetryCollector detach: self tableName
