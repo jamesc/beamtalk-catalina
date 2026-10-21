@@ -14,8 +14,10 @@
 /// Args: `#server`, the `ServerSupervisor`. Restart: `#permanent`.
 typed Actor subclass: ShutdownListener
   state: server :: ServerSupervisor
-  // Set by `attach`; nil if the server shuts down before it ran.
-  state: listener :: Listener | Nil = nil
+  // Acquired once by `attach`. A listener restart restarts this actor too
+  // (`restForOne`), so the handle cannot go stale. Unset if the server shuts
+  // down before `attach` ran; `terminate:` guards for that.
+  late state: listener :: Listener
 
   class supervisionPolicy -> RestartStrategy => #permanent
 
@@ -28,7 +30,6 @@ typed Actor subclass: ShutdownListener
     nil
 
   terminate: _reason :: Object -> Nil =>
-    (self.listener notNil and: [
-      self.listener isAlive
-    ]) ifTrue: [self.listener stop]
+    // `stop` is idempotent, so an already-stopped listener is fine.
+    (self hasField: #listener) ifTrue: [self.listener stop]
     nil

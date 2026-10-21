@@ -188,7 +188,20 @@ must build with zero type warnings: `beamtalk.toml`'s `[diagnostics]`
 makes `type`, `type-annotation` and `dnu` errors, and `just test` (which CI
 runs) adds `--warnings-as-errors`. An `@expect` is allowed only where a
 Beamtalk limitation forces it, with a comment and a Linear issue under
-BT-3957. The workarounds in place:
+BT-3957.
+
+Slots acquired exactly once by a lifecycle step and valid for that
+resource's life are `late state: x :: T`: `Handler handlerOptions` and
+`socket`, `Listener localInfo`, `Acceptor listenSocket`, `connections` and
+`handlerConfig`, `ShutdownListener listener`. Reads that `unguarded-late-read`
+flags (from `handleInfo:` or `terminate:`) sit inside a `(self hasField:
+#x) ifTrue: [...]` guard. Slots that can become empty again or would be
+wrong if stale stay `T | Nil = nil`: the handler's read-timer slots. Start
+args are plain typed slots with no default (`state: config ::
+ServerConfig`): they are supplied at spawn. User data where nil is a valid
+value (`Handler userState`) is `Object`. Values cannot have `late` fields.
+
+The workarounds in place:
 
 - `Integer | #infinity` rather than the stdlib `Timeout` alias for fields
   with an Integer default (BT-4039).

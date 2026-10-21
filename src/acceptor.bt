@@ -33,13 +33,15 @@
 /// Args: `#id`, `#parent` (its `AcceptorSupervisor`), `#server` and
 /// `#config`. Restart: `#transient`.
 typed Server subclass: Acceptor
+  // The start args: supplied at spawn, so plain typed slots rather than
+  // `late`.
   state: id :: Integer
   state: parent :: AcceptorSupervisor
   state: server :: ServerSupervisor
   state: config :: ServerConfig
-  // Set by `attach`, before the first `#accept`. Not `late`: it is read
-  // from `handleInfo:`, where an unguarded `late` read is flagged.
-  state: listenSocket :: Object = nil
+  // Acquired once by `attach` and valid until the listener closes it, which
+  // ends this acceptor. `acceptOnce` guards its read with `hasField:`.
+  late state: listenSocket :: Object
   late state: connections :: ConnectionSupervisor
   late state: handlerConfig :: HandlerConfig
   state: count :: Integer = 0
@@ -77,11 +79,17 @@ typed Server subclass: Acceptor
     Erlang erlang send: self pid msg: #accept
     nil
 
+  /// `attach` sends the first `#accept`, so the socket is set; an `#accept`
+  /// from anywhere else before that is ignored.
   acceptOnce -> Nil =>
-    result := self.config transport accept: self.listenSocket
-    result isOk ifTrue: [
-      self onAccepted: result value
-    ] ifFalse: [self onAcceptError: result error]
+    (self hasField: #listenSocket)
+      ifTrue: [
+        result := self.config transport accept: self.listenSocket
+        result isOk ifTrue: [
+          self onAccepted: result value
+        ] ifFalse: [self onAcceptError: result error]
+      ]
+    nil
 
   onAccepted: rawSocket :: Object -> Nil =>
     self.count := self.count + 1

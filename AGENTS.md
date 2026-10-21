@@ -123,6 +123,14 @@ warnings. `beamtalk.toml`'s `[diagnostics]` makes `type`,
 where a Beamtalk limitation forces it, with a comment citing the Linear
 issue. `Handler` is `typed`, so its subclasses are too.
 
+A slot acquired exactly once by a lifecycle step (`initialize`, the
+handshake, a listen or accept) and valid for that resource's life is
+`late state: x :: T`. Keep `T | Nil = nil` only for slots that can become
+empty again or would be wrong if stale (timers that are cancelled and
+re-armed). The test is "would a stale, already-assigned value here be
+wrong?" (language guide § `late` Slots). Guard reads from `handleInfo:` or
+`terminate:` with `(self hasField: #x) ifTrue: [...]`.
+
 ## Development Workflow
 
 The `.mcp.json` MCP server gives you a live REPL session; Claude Code starts

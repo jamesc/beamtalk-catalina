@@ -56,8 +56,6 @@ TestCase subclass: ListenerTest
     ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
     (Erlang gen_tcp) close: ls
     listener := Listener startFor: (self configFor: port)
-    // `error` is typed as the spec's raw reason but is an Exception (BT-4023).
-    @expect dnu
     self assert: (((Erlang gen_tcp) listen: port with: #()) error reason) equals: #eaddrinuse
     listener stop
 
