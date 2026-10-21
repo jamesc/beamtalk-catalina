@@ -12,7 +12,7 @@ sealed typed Object subclass: HandlerHarness
   /// names one), merging `options` into the
   /// server options and `#table => name` into `handlerOptions`, and answer
   /// its port.
-  class sealed start: handler :: Class options: options :: Dictionary table: name :: Symbol -> Integer =>
+  class sealed start: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> Integer =>
     withPort := (options includesKey: #port) ifTrue: [
       options
     ] ifFalse: [options at: #port put: 0]

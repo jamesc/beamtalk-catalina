@@ -15,7 +15,7 @@
 /// traps exits, and a supervisor's shutdown would then wait behind the
 /// blocked `accept` for the whole shutdown timeout. While blocked it cannot
 /// answer calls either, so nothing calls it; observe it through its
-/// supervisor (`whichChildren`) or, from Phase 5, telemetry.
+/// supervisor (`whichChildren`) or its telemetry events.
 ///
 /// Accept errors, as in `acceptor.ex`:
 ///
@@ -28,7 +28,9 @@
 /// | `closed` (the listener stopped) | stop normally; `#transient`, so it stays down |
 /// | anything else | raise, so the supervisor restarts it |
 ///
-/// Events are added in Phase 5.
+/// Each event is on the acceptor's `#acceptor` span (`CatalinaTelemetry`);
+/// `closed` and an unexpected error stop the span with `#connections`, the
+/// number accepted.
 ///
 /// Args: `#id`, `#parent` (its `AcceptorSupervisor`), `#server` and
 /// `#config`. Restart: `#transient`.
@@ -50,6 +52,8 @@ typed Server subclass: Acceptor
   late state: listenSocket :: Object
   late state: connections :: ConnectionSupervisor
   late state: handlerConfig :: HandlerConfig
+  // The `#acceptor` span, a child of the listener's, started by `attach`.
+  late state: span :: CatalinaTelemetry
   state: count :: Integer = 0
 
   class supervisionPolicy -> RestartStrategy => #transient
@@ -71,7 +75,11 @@ typed Server subclass: Acceptor
     // `childWithId:` answers Object; `#connections` is a ConnectionSupervisor.
     sup :: ConnectionSupervisor := (self.parent childWithId: #connections) unwrap
     self.connections := sup
-    self.listenSocket := (listener withTimeout: 15000) acceptorInfo: self.id
+    patient := listener withTimeout: 15000
+    self.listenSocket := patient acceptorInfo: self.id
+    parentSpan := patient listenerSpan
+    self.span := parentSpan startChild: #acceptor
+    patient stop
     self.handlerConfig := HandlerConfig fromServerConfig: self.config
     self acceptNext
 
@@ -99,28 +107,66 @@ typed Server subclass: Acceptor
 
   onAccepted: rawSocket :: Object -> Nil =>
     self.count := self.count + 1
-    Connection
+    started := Connection
       start: rawSocket
       connections: self.connections
       config: self.config
       handlerConfig: self.handlerConfig
-      span: nil
+      span: self.span
     // A failed start is one connection's problem: Connection has closed the
-    // socket, so carry on (spawn_error event in Phase 5).
+    // socket, so report it and carry on.
+    started isError ifTrue: [self spawnError: started error]
     self acceptNext
+
+  /// `spawn_error`, with the reason unless the server was full.
+  spawnError: reason :: Object -> Nil =>
+    reason match: [
+      #too_many_connections -> self.span
+        event: #spawn_error
+        measurements: #{}
+        metadata: #{};
+      {#spawn_error, r} -> self.span
+        event: #spawn_error
+        measurements: #{#error => r}
+        metadata: #{};
+      _ -> self.span
+        event: #spawn_error
+        measurements: #{#error => reason}
+        metadata: #{}
+    ]
+    nil
 
   /// `reason` is the transport's bare reason (`Transport`).
   onAcceptError: reason :: Object -> Nil =>
     reason =:= #closed
       ifTrue: [
+        self.span stopWith: #{#connections => self.count} metadata: #{}
         self stop
         ^nil
       ]
     (reason isKindOf: Symbol) ifFalse: [^self unexpected: reason]
-    (#(#econnaborted, #einval) includes: reason) ifTrue: [^self acceptNext]
-    (Acceptor transientErrors includes: reason) ifTrue: [^self acceptNext]
+    (#(#econnaborted, #einval) includes: reason)
+      ifTrue: [
+        self.span
+          event: reason
+          measurements: #{}
+          metadata: #{}
+        ^self acceptNext
+      ]
+    (Acceptor transientErrors includes: reason)
+      ifTrue: [
+        self.span
+          event: #accept_error
+          measurements: #{#error => reason}
+          metadata: #{}
+        ^self acceptNext
+      ]
     (#(#emfile, #enfile) includes: reason)
       ifTrue: [
+        self.span
+          event: #emfile
+          measurements: #{#error => reason}
+          metadata: #{}
         Timer sleep: Acceptor fdExhaustionWait
         ^self acceptNext
       ]
@@ -128,4 +174,7 @@ typed Server subclass: Acceptor
 
   /// Anything else is a fault: crash, so the supervisor restarts us.
   unexpected: reason :: Object -> Nil =>
+    self.span stopWith: #{
+      #connections => self.count
+    } metadata: #{#error => reason}
     Error signal: "Unexpected error in accept: " ++ reason printString

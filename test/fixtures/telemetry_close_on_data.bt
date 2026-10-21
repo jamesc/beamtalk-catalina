@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Telemetry.CloseOnData` from `handler_test.exs`.
+Handler subclass: TelemetryCloseOnData
+
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult close: st

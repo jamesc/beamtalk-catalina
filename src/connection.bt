@@ -29,8 +29,8 @@
 /// ```
 sealed typed Object subclass: Connection
 
-  class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Result =>
-    startTime := Erlang erlang monotonic_time
+  class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Result =>
+    startTime := CatalinaTelemetry monotonicTime
     transport := handlerConfig transport
     started := self
       startChildOn: connections

@@ -16,7 +16,9 @@
 ///
 /// Args: `#config`, the server's `ServerConfig`. Restart: `#transient`.
 ///
-/// The listener telemetry span arrives in Phase 5.
+/// It owns the server's `#listener` telemetry span: started once the
+/// sockets are open, stopped in `terminate:` (so the listener traps exits,
+/// which is harmless: it never blocks).
 ///
 /// ## Examples
 /// ```beamtalk
@@ -30,6 +32,8 @@ typed Actor subclass: Listener
   // listener's life (it is stopped, not emptied). A TCP listen socket is a
   // Port, a TLS one an `sslsocket` record (a Tuple).
   late state: sockets :: List(Port | Tuple)
+  // The `#listener` span, started by `initialize` once the sockets are open.
+  late state: span :: CatalinaTelemetry
   // The first socket's `{ip, port}` (or `{local, path}`), set by `initialize`.
   late state: localInfo :: Tuple
 
@@ -51,6 +55,13 @@ typed Actor subclass: Listener
 
   /// The listen sockets, in order.
   listenSockets -> List(Port | Tuple) => self.sockets
+
+  /// The `#listener` span, parent of the acceptors' spans.
+  listenerSpan -> CatalinaTelemetry => self.span
+
+  terminate: _reason :: Object -> Nil =>
+    (self hasField: #span) ifTrue: [self.span stop]
+    nil
 
   /// Open the sockets, or close the ones already open and fail.
   openSockets -> Nil =>
@@ -81,6 +92,16 @@ typed Actor subclass: Listener
       ]
     self.sockets := opened
     self.localInfo := local
+    self.span := CatalinaTelemetry
+      startSpan: #listener
+      measurements: #{}
+      metadata: #{
+        #handler => self.config handler,
+        #local_address => (local at: 1),
+        #local_port => (local at: 2),
+        #transport_module => self.config transport,
+        #transport_options => self.config transportOptions
+      }
     nil
 
   /// The port further sockets bind to: the one the OS gave the first

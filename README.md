@@ -92,11 +92,15 @@ and `then:` forms).
 **Transports**: `TCPTransport`, `SSLTransport`, and the `Transport`
 protocol for your own (sealed, with `class sealed` methods).
 
-Not there yet:
-- Telemetry spans and events come with the stdlib `Telemetry` facade
-  (`PLAN.md` § Phase 5). `telemetrySpan` is carried but empty until then.
-- A handler cannot handle a linked process's abnormal exit itself
-  (BT-4052).
+**Telemetry**: `telemetry` events `[catalina, listener|acceptor|connection,
+...]`, with Thousand Island's names, measurements and metadata (see
+`CatalinaTelemetry`). Attach with the stdlib `Telemetry attach:to:do:`, or
+`CatalinaLogger attach: #error`/`#info`/`#debug`/`#trace` to log them.
+`Socket telemetrySpan` is the connection's `CatalinaTelemetry` span, and
+its `telemetrySpanContext` parents your own spans.
+
+Not there yet: a handler cannot handle a linked process's abnormal exit
+itself (BT-4052).
 
 ## Classes
 
@@ -109,10 +113,8 @@ Not there yet:
 | `Socket` | a connection as a handler sees it | `Socket` |
 | `Transport`, `TCPTransport`, `SSLTransport` | the transports | `Transport`, `Transports.TCP`, `Transports.SSL` |
 | `TransportOptions`, `TransportResult` | listen options; bare error reasons | `Transport.resolve_options/1` |
+| `CatalinaTelemetry`, `CatalinaLogger` | telemetry spans and events; logging them | `Telemetry`, `Logger` |
 | `Listener`, `Acceptor`, `Connection`, the supervisors | the server's internals | as named |
-
-Telemetry (`[catalina, ...]` events) arrives with the stdlib `Telemetry`
-facade; see `PLAN.md` § Phase 5.
 
 ## Development
 
