@@ -6,18 +6,18 @@
 RecordingHandler subclass: SendWhileReading
 
   handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
-    Erlang erlang
-      send_after: 1
-      dest: self pid
-      msg: #sendBytes
+    Timer
+      send: #sendBytes
+      to: self
+      after: 1
     HandlerResult continue: st
 
   handleUserInfo: msg :: Object -> Object =>
     msg =:= #sendBytes
       ifTrue: [
         self socket send: "A"
-        Erlang erlang
-          send_after: 1
-          dest: self pid
-          msg: #sendBytes
+        Timer
+          send: #sendBytes
+          to: self
+          after: 1
       ]

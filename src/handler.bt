@@ -78,7 +78,7 @@ typed Server subclass: Handler
   state: userState :: Object = nil
   // The timer slots stay nilable: a timer is cancelled and re-armed, so a
   // stale value would be wrong.
-  state: readTimer :: Reference | Nil = nil
+  state: readTimer :: Timer | Nil = nil
   // The ref the running timer's message carries; a message with any other
   // ref is stale.
   state: timerTag :: Reference | Nil = nil
@@ -185,7 +185,7 @@ typed Server subclass: Handler
         ^nil
       ]
     remote :: Tuple := peer value
-    Erlang proc_lib set_label: {#catalina_connection, remote}
+    self processLabel: {#catalina_connection, remote}
     span := acceptorSpan isNil
       ifTrue: [nil]
       ifFalse: [
@@ -376,19 +376,19 @@ typed Server subclass: Handler
     nil
 
   startTimer: ms :: Integer deadline: deadline :: Integer -> Nil =>
-    tag := Erlang erlang make_ref
+    tag := Reference new
     self.timerTag := tag
-    self.readTimer := Erlang erlang
-      send_after: ms
-      dest: self pid
-      msg: {#catalina_read_timeout, tag}
+    self.readTimer := Timer
+      send: {#catalina_read_timeout, tag}
+      to: self
+      after: ms
     self.readDeadline := deadline
     self.timerDeadline := deadline
     nil
 
   cancelReadTimer -> Nil =>
     timer := self.readTimer
-    timer isNil ifFalse: [Erlang erlang cancel_timer: timer]
+    timer isNil ifFalse: [timer cancel]
     self.readTimer := nil
     self.timerTag := nil
     self.readDeadline := nil

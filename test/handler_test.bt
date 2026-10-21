@@ -231,7 +231,10 @@ TestCase subclass: HandlerTest
     self assert: (self awaitLogged: #timeout)
 
   testClientSendingWithinReadTimeoutKeepsConnectionOpen =>
-    port := self start: LocalPingHandler options: #{#readTimeout => 100}
+    // Thousand Island uses a 100 ms timeout against a 50 ms send cadence.
+    // On a busy CI runner, with the other test classes running alongside,
+    // one 50 ms sleep can stretch past 100 ms, so the margin here is 5x.
+    port := self start: LocalPingHandler options: #{#readTimeout => 250}
     client := self connect: port
     6
       timesRepeat: [
