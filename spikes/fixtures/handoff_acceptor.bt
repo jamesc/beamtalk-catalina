@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Spike 2: an acceptor Actor that accepts one connection, starts a
+/// `ReadyHandler`, passes the socket to it with `controlling_process` and
+/// then sends it the ready message, as Thousand Island's `connection.ex` does.
+Actor subclass: HandoffAcceptor
+  state: listenSocket = nil
+
+  acceptOne =>
+    sock := ((Erlang gen_tcp) accept: self.listenSocket with: 2000) unwrap
+    handler := ReadyHandler spawn
+    ((Erlang gen_tcp) controlling_process: sock with: handler pid) unwrap
+    Erlang erlang send: handler pid msg: {#catalina_ready, sock}
+    handler

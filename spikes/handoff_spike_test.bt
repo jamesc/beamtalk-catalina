@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Spike 2 (PLAN.md Phase 0): `controlling_process` from an acceptor Actor to
+/// a handler Actor's pid works, and the ready message arrives before the
+/// first `{tcp, ...}`.
+TestCase subclass: HandoffSpikeTest
+
+  /// The client sends before the acceptor has even accepted, so its bytes
+  /// are already waiting in the kernel when the socket changes owner.
+  handoffWith: listenOpts =>
+    ls := ((Erlang gen_tcp) listen: 0 with: listenOpts) unwrap
+    port := ((Erlang inet) port: ls) unwrap
+    client := ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})) unwrap
+    (Erlang gen_tcp) send: client with: "early"
+    acceptor := HandoffAcceptor spawnWith: #{#listenSocket => ls}
+    // Let the accepted socket see the bytes before ownership moves.
+    Timer sleep: 50
+    handler := acceptor acceptOne
+    (Erlang gen_tcp) send: client with: "late"
+    log := handler log
+    20
+      timesRepeat: [
+        log size < 3
+          ifTrue: [
+            Timer sleep: 10
+            log := handler log
+          ]
+      ]
+    handler stop
+    acceptor stop
+    (Erlang gen_tcp) close: client
+    (Erlang gen_tcp) close: ls
+    log
+
+  testReadyArrivesFirstWhenAcceptedSocketIsPassive =>
+    log := self handoffWith: #(#binary, {#active, false}, {#reuseaddr, true})
+    self assert: log first equals: #ready
+    // Both writes arrive, possibly coalesced into one packet.
+    self assert: log rest join equals: "earlylate"
+
+  testTcpOvertakesReadyWhenAcceptedSocketIsActive =>
+    // The condition the port must avoid: a listen socket in {active, once}
+    // hands each accepted socket that mode, so the acceptor owns a {tcp, ...}
+    // message before the handoff. controlling_process moves it to the new
+    // owner's mailbox, ahead of the ready message.
+    log := self handoffWith: #(#binary, {#active, #once}, {#reuseaddr, true})
+    self assert: log first equals: "early"
+    self assert: (log at: 2) equals: #ready

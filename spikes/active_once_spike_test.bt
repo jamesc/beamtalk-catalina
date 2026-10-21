@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Spike 1 (PLAN.md Phase 0): a `Server` owns a `gen_tcp` socket set
+/// `{active, once}`, receives `{tcp, S, Data}` in `handleInfo:` and re-arms.
+TestCase subclass: ActiveOnceSpikeTest
+
+  /// A connected {client, server-side} socket pair over loopback, both
+  /// passive. The listen socket is closed once the pair is accepted.
+  socketPair =>
+    ls := ((Erlang gen_tcp) listen: 0 with: #(#binary, {#active, false}, {#reuseaddr, true})) unwrap
+    port := ((Erlang inet) port: ls) unwrap
+    client := ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})) unwrap
+    server := ((Erlang gen_tcp) accept: ls with: 1000) unwrap
+    (Erlang gen_tcp) close: ls
+    {client, server}
+
+  /// Spawn an echo server and hand it the server side of a fresh pair.
+  echoFor: serverSock with: args =>
+    echo := ActiveOnceEcho spawnWith: args
+    ((Erlang gen_tcp) controlling_process: serverSock with: echo pid) unwrap
+    echo own: serverSock
+    echo
+
+  roundTrip: client payload: payload =>
+    (Erlang gen_tcp) send: client with: payload
+    ((Erlang gen_tcp)
+      recv: client
+      with: 0
+      with: 1000) unwrap
+
+  testHandleInfoReceivesTcpAndRearms =>
+    {client, serverSock} := self socketPair
+    echo := self echoFor: serverSock with: #{}
+    self assert: (self roundTrip: client payload: "a") equals: "a"
+    self assert: (self roundTrip: client payload: "bb") equals: "bb"
+    self assert: (self roundTrip: client payload: "ccc") equals: "ccc"
+    self assert: echo packets equals: 3
+    // Re-armed after the last packet.
+    self assert: echo activeOption equals: #({#active, #once})
+    echo stop
+    (Erlang gen_tcp) close: client
+
+  testWithoutRearmOnlyOnePacketArrives =>
+    {client, serverSock} := self socketPair
+    echo := self echoFor: serverSock with: #{#rearm => false}
+    self assert: (self roundTrip: client payload: "first") equals: "first"
+    // {active, once} dropped back to passive after one message.
+    self assert: echo activeOption equals: #({#active, false})
+    (Erlang gen_tcp) send: client with: "second"
+    self
+      assert: ((Erlang gen_tcp)
+        recv: client
+        with: 0
+        with: 200) isError
+    self assert: echo packets equals: 1
+    echo stop
+    (Erlang gen_tcp) close: client
+
+  testTcpClosedArrivesInHandleInfo =>
+    table := Ets new: #activeOnceSpikeClosed type: #set
+    {client, serverSock} := self socketPair
+    echo := self echoFor: serverSock with: #{
+      #tableName => #activeOnceSpikeClosed
+    }
+    (Erlang gen_tcp) close: client
+    50 timesRepeat: [echo isAlive ifTrue: [Timer sleep: 10]]
+    self deny: echo isAlive
+    self assert: (table at: #reason) equals: {#shutdown, #peer_closed}
+    table delete
