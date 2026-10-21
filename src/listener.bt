@@ -19,7 +19,10 @@
 /// The listener telemetry span arrives in Phase 5.
 typed Actor subclass: Listener
   state: config :: ServerConfig
-  state: sockets :: List(Object) = #()
+  // The listen sockets, opened once by `initialize` and open for the
+  // listener's life (it is stopped, not emptied). A TCP listen socket is a
+  // Port, a TLS one an `sslsocket` record (a Tuple).
+  late state: sockets :: List(Port | Tuple)
   // The first socket's `{ip, port}` (or `{local, path}`), set by `initialize`.
   late state: localInfo :: Tuple
 
@@ -45,28 +48,42 @@ typed Actor subclass: Listener
   listenerInfo -> Tuple => self.localInfo
 
   /// The listen socket acceptor `id` accepts on.
-  acceptorInfo: id :: Integer -> Object =>
+  acceptorInfo: id :: Integer -> Port | Tuple =>
     self.sockets at: (Listener socketIndexFor: id count: self.sockets size)
 
   /// The listen sockets, in order.
-  listenSockets -> List(Object) => self.sockets
+  listenSockets -> List(Port | Tuple) => self.sockets
 
+  /// Open the sockets, or close the ones already open and fail.
   openSockets -> Nil =>
     transport := self.config transport
     first := transport listen: self.config port options: self.config transportOptions
-    first isError ifTrue: [self closeAllAndSignal: first error]
-    self.sockets := #() add: first value
+    first isError ifTrue: [^self failWith: first error]
+    opened :: List(Port | Tuple) := #() add: first value
     info := transport sockname: first value
-    info isError ifTrue: [self closeAllAndSignal: info error]
-    self.localInfo := info value
-    port := self bindPort: self.localInfo
+    info isError
+      ifTrue: [
+        // Sockets are closed here, not in a helper: a List of ports is bound
+        // to this process and is not passed in a message, even to self.
+        opened do: [:s | transport close: s]
+        ^self failWith: info error
+      ]
+    local :: Tuple := info value
+    port := self bindPort: local
     2
       to: self.config numListenSockets
       do: [:_i |
         next := transport listen: port options: self.config transportOptions
-        next isError ifTrue: [self closeAllAndSignal: next error]
-        self.sockets := self.sockets add: next value
+        next isError
+          ifTrue: [
+            opened do: [:s | transport close: s]
+            ^self failWith: next error
+          ]
+        opened := opened add: next value
       ]
+    self.sockets := opened
+    self.localInfo := local
+    nil
 
   /// The port further sockets bind to: the one the OS gave the first
   /// socket, or the configured one for a non-IP (Unix domain) socket.
@@ -77,8 +94,6 @@ typed Actor subclass: Listener
       (info at: 2) isKindOf: Integer
     ]) ifTrue: [info at: 2] ifFalse: [self.config port]
 
-  /// Close what is open and fail the start with the transport's reason.
-  closeAllAndSignal: reason :: Object -> Nil =>
-    self.sockets do: [:s | self.config transport close: s]
-    self.sockets := #()
+  /// Fail the start with the transport's reason.
+  failWith: reason :: Object -> Nil =>
     Error signal: "Listener could not open its sockets: " ++ reason printString

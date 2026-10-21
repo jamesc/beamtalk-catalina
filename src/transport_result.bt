@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// TransportResult — normalises an Erlang socket call's `Result` to the
+/// `Transport` contract: its error side is the bare Erlang reason
+/// (`#closed`, `#timeout`, `{#tls_alert, ...}`), not the Exception the FFI
+/// boundary wraps an `{error, R}` in (ADR 0076, BT-3954). Shared by every
+/// transport.
+///
+/// ## Examples
+/// ```beamtalk
+/// TransportResult bare: ((Erlang file) read_file: "/no/such/file")   // => Result error: #enoent
+/// ```
+sealed typed Object subclass: TransportResult
+
+  /// `result` with an Exception error replaced by its `reason`.
+  class sealed bare: result :: Result(Object, Exception) -> Result(Object, Object) =>
+    result mapError: [:e | e reason]

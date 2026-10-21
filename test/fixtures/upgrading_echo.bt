@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleConnection.UpgradingEcho`: says HELLO in clear text, then
+/// switches the connection to TLS and echoes.
+RecordingHandler subclass: UpgradingEcho
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: "HELLO"
+    HandlerResult
+      switchTransport: SSLTransport
+      options: self tlsOptions
+      state: st
+
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: data
+    HandlerResult continue: st
+
+  tlsOptions -> List =>
+    #({#certfile, "test/fixtures/cert.pem"}, {#keyfile, "test/fixtures/key.pem"})

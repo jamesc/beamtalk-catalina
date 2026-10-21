@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Shared plumbing for tests that run a real server with a
+/// `RecordingHandler` fixture. Each test owns an Ets table (`name`): the
+/// handlers log their events there, and the servers a test starts are kept
+/// there for `stopAll:` (a TestCase is a Value, so a helper cannot set a
+/// field).
+sealed typed Object subclass: HandlerHarness
+
+  /// Start a one-acceptor server for `handler`, merging `options` into the
+  /// server options and `#table => name` into `handlerOptions`, and answer
+  /// its port.
+  class sealed start: handler :: Class options: options :: Dictionary table: name :: Symbol -> Integer =>
+    all := ((options at: #port put: 0) at: #handler put: handler) at: #numAcceptors put: 1
+    handlerOptions :: Dictionary := all at: #handlerOptions ifAbsent: [#{}]
+    all := all at: #handlerOptions put: (handlerOptions at: #table put: name)
+    srv := (Catalina start: all) unwrap
+    table := Ets named: name
+    table at: #servers put: ((table at: #servers ifAbsent: [#()]) add: srv)
+    srv listenerInfo unwrap at: 2
+
+  /// The server started last.
+  class sealed serverIn: name :: Symbol -> ServerSupervisor =>
+    ((Ets named: name) at: #servers) last
+
+  /// Stop every server still running.
+  class sealed stopAll: name :: Symbol -> Nil =>
+    servers :: List(ServerSupervisor) := (Ets named: name) at: #servers ifAbsent: [
+      #()
+    ]
+    servers do: [:srv | srv isAlive ifTrue: [srv stop]]
+    nil
+
+  /// The events logged so far.
+  class sealed logIn: name :: Symbol -> List(Object) =>
+    (Ets named: name) at: #log ifAbsent: [#()]
+
+  /// Wait up to three seconds for `event` to be logged.
+  class sealed await: event :: Object in: name :: Symbol -> Boolean =>
+    300 timesRepeat: [
+      ((self logIn: name) includes: event) ifFalse: [Timer sleep: 10]
+    ]
+    (self logIn: name) includes: event
+
+  /// The first logged `{tag, ...}` tuple, waiting up to three seconds for one.
+  class sealed entry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
+    300 timesRepeat: [
+      (self findEntry: tag in: name) isNil ifTrue: [Timer sleep: 10]
+    ]
+    self findEntry: tag in: name
+
+  class sealed findEntry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
+    tuples :: List(Tuple) := (self logIn: name) select: [:e | e isKindOf: Tuple]
+    tuples detect: [:t | (t at: 1) =:= tag] ifNone: [nil]
+
+  // === TLS clients ===
+
+  /// The server's options for `SSLTransport` with the test certificate,
+  /// preferring the ALPN protocol "foo".
+  class sealed tlsServerOptions -> List =>
+    #({#certfile, "test/fixtures/cert.pem"}, {#keyfile, "test/fixtures/key.pem"}, {#alpn_preferred_protocols, #("foo")})
+
+  /// A verifying client: it trusts the test CA.
+  class sealed tlsClientOptions -> List =>
+    #(#binary, {#active, false}, {#verify, #verify_peer}, {#cacertfile, "test/fixtures/ca.pem"})
+
+  /// Connect a TLS client to `port` on 127.0.0.1 with `extra` options too.
+  class sealed tlsConnect: port :: Integer options: extra :: List -> Result =>
+    Erlang application ensure_all_started: #ssl
+    // `ssl:connect/4` may answer `{ok, Socket, Extensions}`, as `handshake` does.
+    SSLTransport
+      handshaken: ((Erlang ssl)
+        connect: {127, 0, 0, 1}
+        with: port
+        with: self tlsClientOptions ++ extra
+        with: 5000)
+
+  /// Start TLS on an already connected clear-TCP client socket.
+  class sealed startTLS: tcpSocket :: Object -> Result =>
+    Erlang application ensure_all_started: #ssl
+    SSLTransport
+      handshaken: ((Erlang ssl)
+        connect: tcpSocket
+        with: self tlsClientOptions
+        with: 5000)
+
+  /// The next data on a TLS client within `ms`, or the bare error.
+  class sealed tlsRecv: client :: Object within: ms :: Integer -> Object =>
+    result := SSLTransport
+      recv: client
+      length: 0
+      timeout: ms
+    result isOk ifTrue: [result value] ifFalse: [result error]

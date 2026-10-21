@@ -1,0 +1,204 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The SSL half of Thousand Island's `socket_test.exs` and the SSL cases of
+/// `server_test.exs`, over `SSLTransport` with the test certificate in
+/// `test/fixtures/` (a CA, and a `localhost`/127.0.0.1 server certificate
+/// it signed, both valid until 2126). Telemetry assertions are ported in
+/// Phase 5.
+TestCase subclass: SecureSocketTest
+
+  tableName -> Symbol => #catalinaSecureSocketTest
+
+  setUp =>
+    Ets new: self tableName type: #set
+    self
+
+  tearDown =>
+    HandlerHarness stopAll: self tableName
+    (Ets named: self tableName) delete
+
+  /// Start an `SSLTransport` server for `handler` and answer its port.
+  start: handler -> Integer => self start: handler options: #{}
+
+  start: handler options: options :: Dictionary -> Integer =>
+    tls := (options at: #transport put: SSLTransport)
+      at: #transportOptions
+      put: HandlerHarness tlsServerOptions
+        ++ (options at: #transportOptions ifAbsent: [#()])
+    HandlerHarness
+      start: handler
+      options: tls
+      table: self tableName
+
+  connect: port :: Integer -> Object => self connect: port options: #()
+
+  connect: port :: Integer options: extra :: List -> Object =>
+    (HandlerHarness tlsConnect: port options: extra) unwrap
+
+  recv: client :: Object -> Object =>
+    HandlerHarness tlsRecv: client within: 3000
+
+  awaitLogged: event -> Boolean =>
+    HandlerHarness await: event in: self tableName
+
+  logged: tag :: Symbol -> Object =>
+    entry := HandlerHarness entry: tag in: self tableName
+    entry isNil ifTrue: [nil] ifFalse: [entry at: 2]
+
+  // ===== common behaviour using ssl =====
+  testSendsAndReceives =>
+    port := self start: EchoHandler
+    client := self connect: port
+    self assert: (SSLTransport send: client data: "HELLO") isOk
+    self assert: (self recv: client) equals: "HELLO"
+
+  testClosesConnections =>
+    port := self start: CloseOnConnect
+    client := self connect: port
+    self assert: (self recv: client) equals: #closed
+
+  // ===== behaviour specific to ssl =====
+  testProvidesConnectionInfo =>
+    port := self start: SecureInfo
+    client := self connect: port options: #({#alpn_advertised_protocols, #("foo")})
+    localPort := (SSLTransport sockname: client) unwrap at: 2
+    self assert: (self recv: client) equals: "done"
+    self assert: (self logged: #sockname) equals: (Result ok: {{127, 0, 0, 1}, port})
+    self assert: (self logged: #peername) equals: (Result ok: {{127, 0, 0, 1}, localPort})
+    self assert: (self logged: #negotiatedProtocol) equals: (Result ok: "foo")
+    self assert: (self logged: #connectionInformation) equals: true
+    self assert: (self logged: #isSecure) equals: true
+
+  testSendsFiles =>
+    port := self start: SendfileOnConnect
+    client := self connect: port
+    received := ""
+    [received size < 9]
+      whileTrue: [
+        chunk := self recv: client
+        (chunk isKindOf: String) ifTrue: [
+          received := received ++ chunk
+        ] ifFalse: [^self fail: "closed early"]
+      ]
+    self assert: received equals: "ABCDEFBCD"
+    self assert: (self awaitLogged: {#sent, Result ok: 6})
+    self assert: (self awaitLogged: {#sent, Result ok: 3})
+
+  testSendsLargeFiles =>
+    // 4 MiB rather than 256 MiB: TLS is slower, and the chunking is what
+    // matters (four 1 MiB chunks).
+    size := 4 * 1024 * 1024
+    path := File tempDirectory ++ "/catalina_tls_sendfile_" ++ System uniqueId printString
+    ((Erlang file) write_file: path with: ((Erlang binary) copy: "x" with: size)) unwrap
+    port := self start: LargeSendfile options: #{
+      #handlerOptions => #{#path => path}
+    }
+    client := self connect: port
+    received := 0
+    done := false
+    [done]
+      whileFalse: [
+        chunk := self recv: client
+        (chunk isKindOf: String) ifTrue: [
+          received := received + chunk size
+        ] ifFalse: [done := true]
+      ]
+    self assert: received equals: size
+    self assert: (self awaitLogged: {#sent, Result ok: size})
+    File delete: path
+
+  testClosesStalledHandshakesOnceHandshakeTimeoutHasElapsed =>
+    port := self start: RecordingHandler options: #{#handshakeTimeout => 500}
+    // Connect at the TCP level but never start a TLS handshake.
+    client := ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+    self assert: (self awaitLogged: {#error, #timeout})
+    Timer sleep: 100
+    self assert: (HandlerHarness serverIn: self tableName) connectionPids unwrap equals: #()
+    self
+      assert: (TCPTransport
+        recv: client
+        length: 0
+        timeout: 1000) error
+      equals: #closed
+    (Erlang gen_tcp) close: client
+
+  testCompletesHandshakesWithinHandshakeTimeout =>
+    port := self start: EchoHandler options: #{#handshakeTimeout => 5000}
+    client := self connect: port
+    SSLTransport send: client data: "HELLO"
+    self assert: (self recv: client) equals: "HELLO"
+
+  // ===== server_test.exs: configuration =====
+  testDefaultOptionsCanBeOverridden =>
+    port := self start: ReadOpt options: #{
+      #transportOptions => #({#send_timeout, 1230})
+    }
+    client := self connect: port
+    SSLTransport send: client data: "send_timeout"
+    self assert: (self recv: client) equals: "ok"
+    self assert: (self awaitLogged: {#opt, Result ok: #({#send_timeout, 1230})})
+
+  testHardcodedOptionsCannotBeOverridden =>
+    port := self start: ReadOpt options: #{
+      #transportOptions => #({#mode, #list})
+    }
+    client := self connect: port
+    SSLTransport send: client data: "mode"
+    self assert: (self recv: client) equals: "ok"
+    self assert: (self awaitLogged: {#opt, Result ok: #({#mode, #binary})})
+
+  testErlangStyleBareOptions =>
+    // `inet6` makes the listener IPv6, so connect to ::1.
+    port := self start: EchoHandler options: #{#transportOptions => #(#inet6)}
+    Erlang application ensure_all_started: #ssl
+    client := (SSLTransport
+      handshaken: ((Erlang ssl)
+        connect: {0, 0, 0, 0, 0, 0, 0, 1}
+        with: port
+        with: #(#binary, {#active, false}, {#verify, #verify_none})
+        with: 5000)) unwrap
+    SSLTransport send: client data: "HI"
+    self assert: (self recv: client) equals: "HI"
+
+  // ===== server_test.exs: invalid configuration =====
+  testFailsToStartWhenTheCertificateIsMissing =>
+    // OTP 28.1+ checks the files when the listener starts (OTP-19706).
+    result := Catalina
+      start: #{
+        #port => 0,
+        #handler => RecordingHandler,
+        #transport => SSLTransport,
+        #transportOptions => #({#certfile, "test/fixtures/no/cert.pem"}, {#keyfile, "test/fixtures/no/key.pem"})
+      }
+    self assert: result isError
+
+  testFailsToStartWithoutAKeyOrCertificate =>
+    result := Catalina start: #{
+      #port => 0,
+      #handler => RecordingHandler,
+      #transport => SSLTransport
+    }
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "keyfile")
+
+  testHandshakeFailsWhenTheClientOffersOnlyUnsupportedCiphers =>
+    port := self start: RecordingHandler
+    attempt := HandlerHarness
+      tlsConnect: port
+      options: #({#ciphers, #(#{
+        #cipher => #rc4_128,
+        #key_exchange => #rsa,
+        #mac => #md5,
+        #prf => #default_prf
+      })})
+    self assert: attempt isError
+    alert := (self logged: #error) match: [
+      {#tls_alert, {kind, _description}} -> kind;
+      _ -> nil
+    ]
+    self assert: alert equals: #insufficient_security

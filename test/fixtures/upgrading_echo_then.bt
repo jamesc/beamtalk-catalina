@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `HandleConnection.UpgradingEchoWithContinue`: as `UpgradingEcho`, then
+/// runs `keepGoing` after the switch.
+UpgradingEcho subclass: UpgradingEchoThen
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: "HELLO"
+    HandlerResult
+      switchTransport: SSLTransport
+      options: self tlsOptions
+      state: st
+      then: #keepGoing
+
+  keepGoing -> Nil => self note: #continued
