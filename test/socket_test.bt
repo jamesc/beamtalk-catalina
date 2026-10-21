@@ -39,9 +39,14 @@ TestCase subclass: SocketTest
       handlerConfig: config
       span: nil
 
-  /// This process's `monitored_by` list.
-  monitoredBy -> List =>
-    (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
+  /// The non-process entries of this process's `monitored_by` list. An
+  /// open raw file monitors its owner as a NIF resource, not a process.
+  /// Processes are left out: runtime services such as the trace store may
+  /// start monitoring this process at any time.
+  fileMonitors -> List =>
+    ((Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2) reject: [:m |
+      m isKindOf: Pid
+    ]
 
   // ===== common behaviour using gen_tcp =====
   testSendsAndReceives =>
@@ -83,7 +88,7 @@ TestCase subclass: SocketTest
   testSendsFiles =>
     client := self connect
     sock := self accept
-    before := self monitoredBy
+    before := self fileMonitors
     self
       assert: (sock
         sendfile: "test/fixtures/sendfile"
@@ -97,10 +102,19 @@ TestCase subclass: SocketTest
         length: 3) unwrap
       equals: 3
     self assert: ((Erlang gen_tcp) recv: client with: 9) unwrap equals: "ABCDEFBCD"
-    // The file is closed again, so no file process still monitors us.
-    self assert: self monitoredBy equals: before
+    // The file is closed again, so it no longer monitors us.
+    self assert: self fileMonitors equals: before
     sock close
     (Erlang gen_tcp) close: client
+
+  /// The premise of the sendfile checks: an open raw file shows up in
+  /// `fileMonitors`, and closing it removes it.
+  testAnOpenRawFileIsAFileMonitor =>
+    before := self fileMonitors
+    fd := ((Erlang file) open: "test/fixtures/sendfile" with: #(#read, #raw, #binary)) unwrap
+    self assert: self fileMonitors size equals: before size + 1
+    (Erlang file) close: fd
+    self assert: self fileMonitors equals: before
 
   testSendsLargeFiles =>
     // 32 MiB rather than Thousand Island's 256 MiB, to keep the suite quick.
