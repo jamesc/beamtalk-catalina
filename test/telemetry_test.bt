@@ -340,7 +340,6 @@ TestCase subclass: TelemetryTest
     self assert: (self count: #connection named: #stop) equals: 1
 
   // ===== CatalinaLogger =====
-
   testLoggerAttachesCumulativelyAndDetaches =>
     self assert: (CatalinaLogger attach: #debug) isOk
     // #debug attached #error, #info and #debug, but not #trace.
