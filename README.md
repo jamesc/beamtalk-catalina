@@ -40,8 +40,17 @@ srv resume
 srv stop: 15000      // stop, waiting up to 15 s for connections to finish
 ```
 
-TLS: pass `#transport => SSLTransport` and `#transportOptions =>
-#({#certfile, "cert.pem"}, {#keyfile, "key.pem"})`.
+TLS: pass `#transport => SSLTransport` and the `ssl` options in
+`transportOptions`:
+
+```beamtalk
+srv := (Catalina start: #{
+  #port => 4443,
+  #handler => EchoHandler,
+  #transport => SSLTransport,
+  #transportOptions => #{#certfile => "cert.pem", #keyfile => "key.pem"}
+}) unwrap
+```
 
 ## Public API
 
@@ -63,6 +72,16 @@ Island. Anything not listed is internal.
 `numAcceptors`, `numListenSockets`, `numConnections`,
 `maxConnectionsRetryCount`, `maxConnectionsRetryWait`, `readTimeout`,
 `handshakeTimeout`, `shutdownTimeout`, `silentTerminateOnError`.
+
+`transportOptions` and `supervisorOptions` take a Dictionary
+(`#{#reuseport => true}`), where Thousand Island takes a keyword list.
+`#key => value` becomes the Erlang option `{key, value}`. The atom-only
+listen options `binary`, `list`, `inet`, `inet6` and `local` take `true`
+(the bare atom) or `false` (left out). A key that is not a Symbol, or an
+atom-only option that is not `true` or `false`, is an error. A List is
+passed through as a raw Erlang proplist (`#(#inet6, {#reuseport, true})`),
+for when the order of the options matters or an option has no Dictionary
+form. Either way, `config transportOptions` answers the proplist.
 
 **Handlers** (`Handler`, a `typed` `Server`; subclasses annotate their
 callbacks):

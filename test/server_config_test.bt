@@ -103,6 +103,102 @@ TestCase subclass: ServerConfigTest
     self assert: config shutdownTimeout equals: 15000
     self deny: config silentTerminateOnError
 
+  // ===== transportOptions and supervisorOptions as a Dictionary =====
+  testDictionaryOptionsBecomeProplists =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #transportOptions => #{#reuseport => true, #send_timeout => 1230},
+        #supervisorOptions => #{#name => #catalinaConfigTest}
+      }
+    self assert: (config transportOptions includes: {#reuseport, true})
+    self assert: (config transportOptions includes: {#send_timeout, 1230})
+    self assert: config transportOptions size equals: 2
+    self assert: config supervisorOptions equals: #({#name, #catalinaConfigTest})
+
+  testListOptionsPassThroughUnchanged =>
+    options := #(#inet6, {#reuseport, true}, {#reuseport, false})
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #transportOptions => options,
+        #supervisorOptions => #({#name, #catalinaConfigTest})
+      }
+    self assert: config transportOptions equals: options
+    self assert: config supervisorOptions equals: #({#name, #catalinaConfigTest})
+
+  testTrueAtomOptionsBecomeBareAtoms =>
+    #(#binary, #list, #inet, #inet6, #local)
+      do: [:flag |
+        config := ServerConfig fromOptions: #{
+          #handler => ServerConfigTest,
+          #transportOptions => (#{} at: flag put: true)
+        }
+        self assert: config transportOptions equals: (#() add: flag)
+      ]
+
+  testFalseAtomOptionsAreLeftOut =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #transportOptions => #{
+          #inet6 => false,
+          #binary => false,
+          #reuseaddr => false
+        }
+      }
+    self assert: config transportOptions equals: #({#reuseaddr, false})
+
+  testRaisesOnANonBooleanAtomOption =>
+    message := self errorFor: #{
+      #handler => ServerConfigTest,
+      #transportOptions => #{#inet6 => 1}
+    }
+    self assert: message equals: "transportOptions option #inet6 must be true or false, got: 1"
+
+  testRaisesOnANonSymbolKey =>
+    message := self errorFor: #{
+      #handler => ServerConfigTest,
+      #transportOptions => #{"reuseport" => true}
+    }
+    self assert: message equals: "transportOptions keys must be Symbols, got: " ++ "reuseport" printString
+    message := self
+      errorFor: #{
+        #handler => ServerConfigTest,
+        #supervisorOptions => #{1 => #catalinaConfigTest}
+      }
+    self assert: message equals: "supervisorOptions keys must be Symbols, got: 1"
+
+  testRaisesWhenOptionsAreNotADictionaryOrList =>
+    message := self errorFor: #{
+      #handler => ServerConfigTest,
+      #transportOptions => 3
+    }
+    self assert: message equals: "transportOptions must be a Dictionary or a List, got: 3"
+
+  testDictionaryReuseportAllowsSeveralListenSockets =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 2,
+        #transportOptions => #{#reuseport => true}
+      }
+    self assert: config numListenSockets equals: 2
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 2,
+        #transportOptions => #{#reuseport_lb => true}
+      }
+    self assert: config numListenSockets equals: 2
+    message := self
+      errorFor: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 2,
+        #transportOptions => #{#reuseport => false}
+      }
+    self assert: (message includesSubstring: "reuseport")
+
   testHandlerConfigFromServerConfig =>
     config := ServerConfig
       fromOptions: #{
