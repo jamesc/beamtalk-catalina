@@ -67,7 +67,13 @@ sealed typed Object subclass: Connection
   class sealed startChildOn: connections :: ConnectionSupervisor args: args :: Dictionary retries: retries :: Integer wait: wait :: Integer -> Result =>
     result := connections startChild: args
     remaining := retries
-    [(self isMaxChildren: result) and: [remaining > 0]]
+    // `isError` first: the common, successful start then skips the error
+    // classification (`isKindOf:` is a call into the class process; BT-4051).
+    [
+      result isError and: [
+        (self isMaxChildren: result error) and: [remaining > 0]
+      ]
+    ]
       whileTrue: [
         Timer sleep: wait
         remaining := remaining - 1
@@ -75,8 +81,7 @@ sealed typed Object subclass: Connection
       ]
     result
 
-  class sealed isMaxChildren: resultOrError :: Object -> Boolean =>
-    error := (resultOrError isKindOf: Result) ifTrue: [
-      resultOrError isError ifTrue: [resultOrError error] ifFalse: [nil]
-    ] ifFalse: [resultOrError]
-    (error isKindOf: Exception) and: [error kind =:= #max_children]
+  /// Whether a `startChild:` error is the supervisor being full.
+  class sealed isMaxChildren: error :: Object -> Boolean =>
+    (error isKindOf: Exception) ifFalse: [^false]
+    error kind =:= #max_children
