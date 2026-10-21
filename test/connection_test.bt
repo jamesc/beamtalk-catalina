@@ -32,4 +32,32 @@ TestCase subclass: ConnectionTest
     connections stop
     table delete
 
+  /// Not in Thousand Island (BT-4051): a handler whose acceptor dies
+  /// between starting it and handing it the socket stops, rather than
+  /// waiting for a ready message that never comes.
+  testAHandlerWhoseAcceptorDiesBeforeTheHandoffStops =>
+    config := ServerConfig fromOptions: #{#handler => EchoHandler}
+    connections := ConnectionSupervisor spawnWith: config
+    acceptor := (Erlang erlang) spawn: [Timer sleep: 60000]
+    handler := (connections startChild: #{
+      #handlerOptions => #(),
+      #acceptor => acceptor
+    }) unwrap
+    self assert: (self isAlive: handler pid)
+    (Erlang erlang) exit: acceptor with: #kill
+    self waitUntilDead: handler pid
+    self deny: (self isAlive: handler pid)
+    self assert: connections children equals: #()
+    connections stop
+
   isAlive: pid -> Boolean => (Erlang erlang) is_process_alive: pid
+
+  /// Poll for up to 5 s: the machine may be loaded.
+  waitUntilDead: pid =>
+    deadline := (Erlang erlang monotonic_time: #millisecond) + 5000
+    [
+      (self isAlive: pid) and: [
+        (Erlang erlang monotonic_time: #millisecond) < deadline
+      ]
+    ] whileTrue: [Timer sleep: 10]
+    nil

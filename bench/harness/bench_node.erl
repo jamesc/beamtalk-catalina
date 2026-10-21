@@ -32,6 +32,7 @@
     acceptors_by_supervisor/0,
     acceptor_pool/0,
     kill/1,
+    kill_acceptor_at_next_handler/1,
     connection_supervisors/0,
     connection_count/0,
     connection_pids/0,
@@ -289,6 +290,27 @@ kill_random_handler() -> kill_random(connection_pids()).
 kill(Pid) ->
     exit(Pid, kill),
     ok.
+
+%% For a one-acceptor server: watch its connection supervisor and kill the
+%% acceptor the moment a handler appears, before (or while) it is handed its
+%% socket. Answers at once; the watcher gives up after `Ms`.
+kill_acceptor_at_next_handler(Ms) ->
+    [ConnSup] = connection_supervisors(),
+    [Acceptor] = acceptors(),
+    Deadline = erlang:monotonic_time(millisecond) + Ms,
+    spawn(fun() -> watch_and_kill(ConnSup, Acceptor, Deadline) end),
+    ok.
+
+watch_and_kill(ConnSup, Acceptor, Deadline) ->
+    case [P || {_, P, _, _} <- safe_children(ConnSup), is_pid(P)] of
+        [_ | _] ->
+            exit(Acceptor, kill);
+        [] ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true -> ok;
+                false -> watch_and_kill(ConnSup, Acceptor, Deadline)
+            end
+    end.
 
 kill_random([]) -> none;
 kill_random(Pids) ->

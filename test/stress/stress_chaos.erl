@@ -21,7 +21,42 @@
 -define(INTERVAL, 50).
 
 tests() ->
-    [{"chaos_kill_acceptors_and_handlers", [catalina, ti], fun chaos/1}].
+    [{"chaos_kill_acceptors_and_handlers", [catalina, ti], fun chaos/1},
+     {"chaos_acceptor_killed_mid_handoff", [catalina, ti], fun mid_handoff/1}].
+
+%% Kill the acceptor right after it starts a handler, before the handler
+%% has its socket. Whatever the client sees, no handler may be left behind
+%% once the client is gone, and the restarted acceptor serves again.
+%% (Thousand Island's handoff is fast enough that the kill usually lands
+%% after it; Catalina's handlers monitor the acceptor until the handoff.)
+mid_handoff(Ctx) ->
+    Rounds = stress_lib:pick(Ctx, {3, 10}),
+    stress_lib:with_server(Ctx, #{num_acceptors => 1}, fun(Port) ->
+        Seen = [begin
+            stress_lib:wait_until(fun() ->
+                [A] = stress_lib:node_call(Ctx, acceptors_by_supervisor, []),
+                is_pid(element(2, A))
+            end, 30000, acceptor_running),
+            ok = stress_lib:node_call(Ctx, kill_acceptor_at_next_handler, [10000]),
+            {ok, C} = bench_conn:connect(Port, false),
+            Outcome = stress_lib:echo_once(C, <<"handoff">>, 5000),
+            bench_conn:abort(C),
+            stress_lib:wait_until(fun() -> stress_lib:node_call(Ctx, connection_count, []) =:= 0 end,
+                                  10000, no_handler_left_behind),
+            %% One kill per 2 s keeps inside the restart intensity.
+            timer:sleep(2000),
+            Outcome
+         end || _ <- lists:seq(1, Rounds)],
+        stress_lib:wait_until(fun() ->
+            [A] = stress_lib:node_call(Ctx, acceptors_by_supervisor, []),
+            is_pid(element(2, A))
+        end, 30000, acceptor_restarted),
+        {ok, C2} = bench_conn:connect(Port, false),
+        After = stress_lib:echo_once(C2, <<"after">>),
+        bench_conn:close(C2),
+        stress_lib:check(After =:= ok, "the restarted acceptor serves", After),
+        #{rounds => Rounds, client_saw => lists:usort(Seen)}
+    end).
 
 chaos(Ctx) ->
     Seconds = stress_lib:pick(Ctx, {5, 30}),
