@@ -78,7 +78,7 @@ typed Server subclass: Handler
   state: userState :: Object = nil
   // The timer slots stay nilable: a timer is cancelled and re-armed, so a
   // stale value would be wrong.
-  state: readTimer :: Timer | Nil = nil
+  state: readTimer :: Reference | Nil = nil
   // The ref the running timer's message carries; a message with any other
   // ref is stale.
   state: timerTag :: Reference | Nil = nil
@@ -378,17 +378,17 @@ typed Server subclass: Handler
   startTimer: ms :: Integer deadline: deadline :: Integer -> Nil =>
     tag := Reference new
     self.timerTag := tag
-    self.readTimer := Timer
-      send: {#catalina_read_timeout, tag}
-      to: self
-      after: ms
+    self.readTimer := Erlang erlang
+      send_after: ms
+      dest: self pid
+      msg: {#catalina_read_timeout, tag}
     self.readDeadline := deadline
     self.timerDeadline := deadline
     nil
 
   cancelReadTimer -> Nil =>
     timer := self.readTimer
-    timer isNil ifFalse: [timer cancel]
+    timer isNil ifFalse: [Erlang erlang cancel_timer: timer]
     self.readTimer := nil
     self.timerTag := nil
     self.readDeadline := nil
