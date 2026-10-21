@@ -1,0 +1,302 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The rest of Thousand Island's `server_test.exs`: several connections,
+/// `numConnections`, `connectionPids`, suspend and resume, shutdown and
+/// draining, `status`/`info`, and TCP option handling. `ServerTest` has the
+/// Phase 2 cases, `SecureSocketTest` the SSL ones. The telemetry cases
+/// ("should emit telemetry events as expected", twice) are ported in Phase 5.
+TestCase subclass: ServerOperationsTest
+
+  tableName -> Symbol => #catalinaServerOperationsTest
+
+  setUp =>
+    Ets new: self tableName type: #set
+    self
+
+  tearDown =>
+    HandlerHarness stopAll: self tableName
+    (Ets named: self tableName) delete
+
+  start: handler -> Integer => self start: handler options: #{}
+
+  start: handler options: options :: Dictionary -> Integer =>
+    HandlerHarness
+      start: handler
+      options: options
+      table: self tableName
+
+  server -> ServerSupervisor => HandlerHarness serverIn: self tableName
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  /// A connection attempt's result: the socket, or the bare error.
+  tryConnect: port :: Integer -> Result =>
+    TransportResult
+      bare: ((Erlang gen_tcp)
+        connect: {127, 0, 0, 1}
+        with: port
+        with: #(#binary, {#active, false})
+        with: 200)
+
+  send: data :: String to: client :: Object -> Object =>
+    (Erlang gen_tcp) send: client with: data
+
+  recv: client :: Object within: ms :: Integer -> Object =>
+    result := TCPTransport
+      recv: client
+      length: 0
+      timeout: ms
+    result isOk ifTrue: [result value] ifFalse: [result error]
+
+  recv: client :: Object -> Object => self recv: client within: 3000
+
+  freePort -> Integer =>
+    ls := ((Erlang gen_tcp) listen: 0 with: #()) unwrap
+    port := ((Erlang inet) port: ls) unwrap
+    (Erlang gen_tcp) close: ls
+    port
+
+  /// Stop the server from another process, as the Elixir tests' `Task`.
+  stopInBackground: srv :: ServerSupervisor -> Nil =>
+    Erlang erlang spawn: [srv stop]
+    nil
+
+  awaitDeath: srv :: ServerSupervisor within: ms :: Integer -> Boolean =>
+    (ms div: 10) timesRepeat: [srv isAlive ifTrue: [Timer sleep: 10]]
+    srv isAlive not
+
+  // ===== connections =====
+  testHandlesSeveralConnections =>
+    port := self start: BlockingEcho
+    client := self connect: port
+    other := self connect: port
+    self send: "HELLO" to: client
+    self send: "BONJOUR" to: other
+    // The second answers first: the connections are concurrent.
+    self assert: (self recv: other) equals: "BONJOUR"
+    self assert: (self recv: client) equals: "HELLO"
+
+  testQueuesConnectionsBeyondNumConnections =>
+    port := self start: EchoHandler options: #{
+      #numAcceptors => 1,
+      #numConnections => 1
+    }
+    client := self connect: port
+    other := self connect: port
+    self send: "HELLO" to: client
+    self send: "BONJOUR" to: other
+    Timer sleep: 100
+    self assert: (self recv: other within: 10) equals: #timeout
+    self assert: (self recv: client) equals: "HELLO"
+    // Closing the first makes room for the second.
+    (Erlang gen_tcp) close: client
+    Timer sleep: 100
+    self assert: (self recv: other) equals: "BONJOUR"
+
+  testClosesQueuedConnectionsThatNeverGetRoom =>
+    port := self start: EchoHandler options: #{
+      #numAcceptors => 1,
+      #numConnections => 1,
+      #maxConnectionsRetryWait => 100
+    }
+    client := self connect: port
+    other := self connect: port
+    self send: "HELLO" to: client
+    self send: "BONJOUR" to: other
+    Timer sleep: 100
+    self assert: (self recv: other within: 10) equals: #timeout
+    self assert: (self recv: client) equals: "HELLO"
+    // Five retries 100 ms apart, then the acceptor gives up on it.
+    Timer sleep: 500
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self recv: other) equals: #closed
+    (Erlang gen_tcp) close: client
+    Timer sleep: 500
+    third := self connect: port
+    self send: "BUONGIORNO" to: third
+    self assert: (self recv: third) equals: "BUONGIORNO"
+
+  testEnumeratesConnectionPids =>
+    port := self start: Whoami
+    client := self connect: port
+    other := self connect: port
+    self assert: (self recv: client) equals: "ready"
+    self assert: (self recv: other) equals: "ready"
+    expected := ((HandlerHarness entries: #pid in: self tableName) collect: [:e |
+      e at: 2
+    ]) asSet
+    self assert: self server connectionPids unwrap asSet equals: expected
+    (Erlang gen_tcp) close: client
+    Timer sleep: 100
+    self assert: self server connectionPids unwrap size equals: 1
+    (Erlang gen_tcp) close: other
+    Timer sleep: 100
+    self assert: self server connectionPids unwrap equals: #()
+
+  // ===== suspend / resume =====
+  testSuspendStopsAcceptingButKeepsExistingConnections =>
+    // A fixed port, so it is the same after `resume`.
+    port := self start: EchoHandler options: #{#port => self freePort}
+    client := self connect: port
+    Timer sleep: 100
+    self assert: self server suspend isOk
+    self assert: (self tryConnect: port) error equals: #econnrefused
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: self server resume isOk
+    fresh := self connect: port
+    self send: "HELLO" to: fresh
+    self assert: (self recv: fresh) equals: "HELLO"
+    (Erlang gen_tcp) close: fresh
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+
+  // ===== shutdown =====
+  testStopStopsAcceptingButLetsConnectionsComplete =>
+    port := self start: BlockingEcho
+    client := self connect: port
+    Timer sleep: 100
+    srv := self server
+    self stopInBackground: srv
+    Timer sleep: 100
+    self assert: (self tryConnect: port) error equals: #econnrefused
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self awaitDeath: srv within: 3000)
+
+  testConnectionsCanSayGoodbye =>
+    port := self start: Goodbye
+    client := self connect: port
+    Timer sleep: 100
+    srv := self server
+    self stopInBackground: srv
+    self assert: (self recv: client) equals: "GOODBYE"
+    self assert: (self awaitDeath: srv within: 3000)
+
+  testShutdownStillWorksAfterSuspendAndResume =>
+    port := self start: Goodbye
+    client := self connect: port
+    Timer sleep: 100
+    srv := self server
+    self assert: srv suspend isOk
+    self assert: srv resume isOk
+    self stopInBackground: srv
+    self assert: (self recv: client) equals: "GOODBYE"
+    self assert: (self awaitDeath: srv within: 3000)
+
+  testForciblyShutsDownConnectionsAfterShutdownTimeout =>
+    port := self start: BlockingEcho options: #{#shutdownTimeout => 500}
+    client := self connect: port
+    Timer sleep: 100
+    srv := self server
+    self stopInBackground: srv
+    Timer sleep: 100
+    // Still waiting on the open connection, which still works.
+    self assert: srv isAlive
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self awaitDeath: srv within: 2000)
+
+  testStopWithAWait =>
+    port := self start: BlockingEcho options: #{#shutdownTimeout => 5000}
+    client := self connect: port
+    Timer sleep: 100
+    srv := self server
+    // The handler blocks in recv for up to `shutdownTimeout`, longer than
+    // the 200 ms wait.
+    self assert: (srv stop: 200) error equals: #timeout
+    self send: "HELLO" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    self assert: (self awaitDeath: srv within: 3000)
+
+  // ===== status / info =====
+  testReportsStatusAcrossSuspendAndResume =>
+    port := self start: EchoHandler
+    srv := self server
+    self assert: srv status equals: #running
+    client := self connect: port
+    Timer sleep: 100
+    self assert: srv suspend isOk
+    self assert: srv status equals: #suspended
+    info := srv info
+    self assert: (info at: #status) equals: #suspended
+    self assert: (info at: #localInfo) equals: nil
+    self assert: (info at: #activeConnections) equals: 1
+    self assert: srv resume isOk
+    self assert: srv status equals: #running
+    (Erlang gen_tcp) close: client
+
+  testReportsLocalInfoAndActiveConnections =>
+    port := self start: EchoHandler
+    srv := self server
+    info := srv info
+    self assert: (info at: #status) equals: #running
+    self assert: ((info at: #localInfo) at: 2) equals: port
+    self assert: (info at: #activeConnections) equals: 0
+    client := self connect: port
+    other := self connect: port
+    Timer sleep: 100
+    self assert: (srv info at: #activeConnections) equals: 2
+    (Erlang gen_tcp) close: client
+    (Erlang gen_tcp) close: other
+    Timer sleep: 100
+    self assert: (srv info at: #activeConnections) equals: 0
+
+  // ===== configuration (TCP) =====
+  testTcpDefaultOptionsCanBeOverridden =>
+    port := self start: ReadOpt options: #{
+      #transportOptions => #({#send_timeout, 1230})
+    }
+    client := self connect: port
+    self send: "send_timeout" to: client
+    self assert: (self recv: client) equals: "ok"
+    self assert: (HandlerHarness await: {#opt, Result ok: #({#send_timeout, 1230})} in: self tableName)
+
+  testTcpHardcodedOptionsCannotBeOverridden =>
+    port := self start: ReadOpt options: #{
+      #transportOptions => #({#mode, #list})
+    }
+    client := self connect: port
+    self send: "mode" to: client
+    self assert: (self recv: client) equals: "ok"
+    self assert: (HandlerHarness await: {#opt, Result ok: #({#mode, #binary})} in: self tableName)
+
+  testTcpErlangStyleBareOptions =>
+    port := self start: EchoHandler options: #{#transportOptions => #(#inet6)}
+    client := ((Erlang gen_tcp)
+      connect: {0, 0, 0, 0, 0, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+    self send: "HI" to: client
+    self assert: (self recv: client) equals: "HI"
+
+  testTcpInetBackendOption =>
+    port := self start: EchoHandler options: #{
+      #transportOptions => #({#inet_backend, #socket})
+    }
+    client := self connect: port
+    self send: "HI" to: client
+    self assert: (self recv: client) equals: "HI"
+
+  testServesOverAUnixDomainSocket =>
+    path := File tempDirectory ++ "/catalina_uds_" ++ System uniqueId printString ++ ".sock"
+    self start: EchoHandler options: #{
+      #transportOptions => #({#ip, {#local, path}})
+    }
+    client := ((Erlang gen_tcp)
+      connect: {#local, path}
+      with: 0
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+    self send: "HI" to: client
+    self assert: (self recv: client) equals: "HI"
+    (Erlang gen_tcp) close: client
+    File delete: path

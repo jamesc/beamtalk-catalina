@@ -735,6 +735,10 @@ The plan as written:
 
 ### Phase 5: Telemetry (`telemetry_test`, telemetry assertions across suites)
 
+- Also the minimal `Logger` from Phase 6: attach a `Telemetry` handler that
+  logs at `#error`/`#info`/`#debug`/`#trace`. Name it so it does not clash
+  with the stdlib `Logger` class (`CatalinaLogger`).
+
 - **Target the stdlib `Telemetry` facade (BT-4025)**, not `(Erlang
   telemetry)` FFI: `Telemetry execute: #(#catalina, #connection, #recv)
   measurements: #{...} metadata: #{...}` for events, `Telemetry attach:
@@ -769,7 +773,42 @@ The plan as written:
   events for a given handler to the test process: `telemetry:attach` with a
   Beamtalk block as the handler fun (blocks are plain funs across the FFI).
 
-### Phase 6: Server operations and polish (`server_test`, 23 tests)
+### Phase 6: Server operations and polish (`server_test`, 23 tests) — done (BT-4046)
+
+134 tests in all. `ServerOperationsTest` (17) ports the rest of
+`server_test.exs`:
+- several connections at once;
+- `numConnections` queueing, and giving up after the retries;
+- `connectionPids`;
+- suspend and resume;
+- stop: accepting stops but connections complete, `handleShutdown:` says
+  goodbye, stop still works after suspend and resume, and connections are
+  killed after `shutdownTimeout`;
+- `status`/`info` across suspend and resume, and the active-connection
+  count;
+- the four TCP option cases (overriding a default, a required option,
+  bare `inet6`, `inet_backend`).
+
+Two additions: `stop:` with a wait that overruns, and serving over a Unix
+domain socket. The two telemetry cases ("should emit telemetry events as
+expected") go to Phase 5. The SSL cases were ported in Phase 4.
+
+Deviations:
+
+- The operations are instance methods on `ServerSupervisor` (`srv
+  suspend`), not `Catalina` class methods (Phase 2's choice). `info`
+  answers a Dictionary (`#status`, `#localInfo`, `#activeConnections`).
+  `stop` (no wait) is the sealed supervisor `stop`.
+- `stop: ms` stops from a spawned process and polls `isAlive`, answering
+  `Result error: #timeout` on overrun. Supervisors have no
+  `gen_server:stop/3` counterpart (BT-4047).
+- The minimal `Logger` needs telemetry events, so it moves to Phase 5.
+- `HandlerHarness` now keeps a port the test names, rather than always
+  using port 0.
+- `README.md` is written, AGENTS.md has a Thousand Island
+  cross-reference, and every `src/` class's comment has an example.
+
+The plan as written:
 
 - `suspend` (`terminateChild: #acceptor` on each of `pool children`, then
   `server terminateChild: #shutdownListener`, then `#listener`), `resume`

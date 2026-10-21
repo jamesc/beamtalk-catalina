@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Goodbye` from `server_test.exs`: says GOODBYE when the server shuts
+/// down.
+Handler subclass: Goodbye
+
+  handleShutdown: sock :: Socket state: _st :: Object -> Object =>
+    sock send: "GOODBYE"

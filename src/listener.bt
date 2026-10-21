@@ -17,6 +17,13 @@
 /// Args: `#config`, the server's `ServerConfig`. Restart: `#transient`.
 ///
 /// The listener telemetry span arrives in Phase 5.
+///
+/// ## Examples
+/// ```beamtalk
+/// listener := srv listener unwrap
+/// listener listenerInfo    // => {{0, 0, 0, 0}, 4000}
+/// listener acceptorInfo: 1 // => the listen socket acceptor 1 uses
+/// ```
 typed Actor subclass: Listener
   state: config :: ServerConfig
   // The listen sockets, opened once by `initialize` and open for the

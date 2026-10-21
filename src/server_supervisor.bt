@@ -22,7 +22,11 @@
 /// ```beamtalk
 /// srv := (Catalina start: #{#port => 0, #handler => EchoHandler}) unwrap
 /// srv listenerInfo   // => Result ok: {{0, 0, 0, 0}, 54321}
-/// srv stop
+/// srv status         // => #running
+/// srv suspend        // => Result ok: nil (existing connections carry on)
+/// srv info           // => #{#status => #suspended, #localInfo => nil, #activeConnections => 0}
+/// srv resume         // => Result ok: nil
+/// srv stop: 15000    // => Result ok: nil
 /// ```
 typed Supervisor subclass: ServerSupervisor
 
@@ -82,3 +86,88 @@ typed Supervisor subclass: ServerSupervisor
         ]
       ]
     Result ok: pids
+
+  // === Server operations (Thousand Island's `ThousandIsland` functions) ===
+
+  /// The number of live connection handlers across the server.
+  activeConnections -> Integer =>
+    total := 0
+    self acceptorSupervisors
+      do: [:accSup |
+        connections :: ConnectionSupervisor := (accSup childWithId: #connections) unwrap
+        connections isNil ifFalse: [total := total + connections count]
+      ]
+    total
+
+  /// `#running` while the server accepts connections, `#suspended` after
+  /// `suspend` (existing connections are not reflected here).
+  status -> #running | #suspended =>
+    (self childWithId: #listener) unwrap isNil ifTrue: [
+      #suspended
+    ] ifFalse: [#running]
+
+  /// What the server is doing, for health checks and consoles: `#status`
+  /// (`status`), `#localInfo` (`listenerInfo`, or nil while suspended) and
+  /// `#activeConnections`. It walks the tree, so call it at human
+  /// timescales. Draining at deploy time is `suspend`, then polling `info`
+  /// until `#activeConnections` is 0.
+  info -> Dictionary =>
+    local := self listenerInfo
+    #{
+      #status => self status,
+      #localInfo => (local isOk ifTrue: [local value] ifFalse: [nil]),
+      #activeConnections => self activeConnections
+    }
+
+  /// Stop accepting connections: stop the acceptors, the shutdown listener
+  /// and the listener, closing the listen sockets. Existing connections
+  /// carry on. On port 0, `resume` binds a new port.
+  suspend -> Result(Nil, Object) =>
+    self acceptorSupervisors
+      do: [:accSup |
+        stopped := accSup terminateChild: #acceptor
+        stopped isError ifTrue: [^Result error: stopped error]
+      ]
+    stopped := self terminateChild: #shutdownListener
+    stopped isError ifTrue: [^Result error: stopped error]
+    self terminateChild: #listener
+
+  /// Undo `suspend`: reopen the listen sockets and restart the acceptors.
+  resume -> Result(Nil, Object) =>
+    #(#listener, #shutdownListener)
+      do: [:id |
+        restarted := self restart: self child: id
+        restarted isError ifTrue: [^restarted]
+      ]
+    self acceptorSupervisors
+      do: [:accSup |
+        restarted := self restart: accSup child: #acceptor
+        restarted isError ifTrue: [^restarted]
+      ]
+    Result ok: nil
+
+  /// Restart the child `id` of `sup`; one already running counts, as
+  /// Thousand Island counts `:running` and `:restarting`.
+  restart: sup :: Supervisor child: id :: Symbol -> Result(Nil, Object) =>
+    restarted := sup restartChild: id
+    restarted isOk ifTrue: [^Result ok: nil]
+    error := restarted error
+    ((error isKindOf: Exception) and: [
+      error kind =:= #child_running
+    ]) ifTrue: [Result ok: nil] ifFalse: [Result error: error]
+
+  /// Stop the server, waiting at most `ms` for connections to finish: the
+  /// listener closes at once, then each handler gets the server's
+  /// `shutdownTimeout`. `Result error: #timeout` if the server is still
+  /// stopping after `ms`; it carries on stopping regardless.
+  stop: ms :: Integer -> Result(Nil, Symbol) =>
+    // `stop` waits with no limit and supervisors have no `stop/3`
+    // (BT-4047), so stop from another process and poll.
+    Erlang erlang spawn: [self stop]
+    deadline := (Erlang erlang monotonic_time: #millisecond) + ms
+    [
+      self isAlive and: [
+        (Erlang erlang monotonic_time: #millisecond) < deadline
+      ]
+    ] whileTrue: [Timer sleep: 10]
+    self isAlive ifTrue: [Result error: #timeout] ifFalse: [Result ok: nil]

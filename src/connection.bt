@@ -20,6 +20,13 @@
 /// is terminated too.
 ///
 /// A handler is started with `#{#handlerOptions => config handlerOptions}`.
+///
+/// ## Examples
+/// ```beamtalk
+/// // In the acceptor, with an accepted raw socket:
+/// Connection start: raw connections: sup config: config handlerConfig: hc span: nil
+/// // => Result ok: nil
+/// ```
 sealed typed Object subclass: Connection
 
   class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Result =>

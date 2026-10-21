@@ -12,6 +12,11 @@
 /// waiting on its start.
 ///
 /// Args: `#server`, the `ServerSupervisor`. Restart: `#permanent`.
+///
+/// ## Examples
+/// ```beamtalk
+/// srv stop   // ShutdownListener stops the listener first, then the rest drains
+/// ```
 typed Actor subclass: ShutdownListener
   state: server :: ServerSupervisor
   // Acquired once by `attach`. A listener restart restarts this actor too
