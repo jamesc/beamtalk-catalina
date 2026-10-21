@@ -5,9 +5,10 @@
 /// `LargeSendfile` handler in `socket_test.exs` does. It runs in its own
 /// process so the test process can read while it sends.
 typed Actor subclass: SendfileHandler
-  state: sent :: Result | Nil = nil
-  state: monitoredBefore :: List | Nil = nil
-  state: monitoredAfter :: List | Nil = nil
+  // Set once by `sendfile:path:`, which the test casts before reading them.
+  late state: sent :: Result
+  late state: monitoredBefore :: List
+  late state: monitoredAfter :: List
 
   /// Send the file and close the connection. Cast this with `!`.
   sendfile: sock :: Socket path: path :: String -> Result =>
@@ -20,7 +21,7 @@ typed Actor subclass: SendfileHandler
     sock close
 
   /// The `sendfile:offset:length:` result.
-  sent -> Result | Nil => self.sent
+  sent -> Result => self.sent
 
   /// This process's `monitored_by` list.
   monitoredBy -> List =>
