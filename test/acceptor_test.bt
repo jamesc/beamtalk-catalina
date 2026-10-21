@@ -93,11 +93,11 @@ TestCase subclass: AcceptorTest
       timesRepeat: [
         client := self connect: port
         // The server closes the accepted socket rather than leave it dangling.
-        result := (Erlang gen_tcp)
+        result := TCPTransport
           recv: client
-          with: 0
-          with: 1000
-        self assert: (ErrorReason of: result error) equals: #closed
+          length: 0
+          timeout: 1000
+        self assert: result error equals: #closed
         (Erlang gen_tcp) close: client
       ]
     self assert: (self acceptorPids: srv) equals: before
@@ -111,11 +111,11 @@ TestCase subclass: AcceptorTest
     port := self portOf: srv
     before := self acceptorPids: srv
     rejected := self connect: port
-    result := (Erlang gen_tcp)
+    result := TCPTransport
       recv: rejected
-      with: 0
-      with: 1000
-    self assert: (ErrorReason of: result error) equals: #closed
+      length: 0
+      timeout: 1000
+    self assert: result error equals: #closed
     (Erlang gen_tcp) close: rejected
     accepted := self connect: port
     self assert: (self echo: "NEXT" on: accepted) equals: "NEXT"

@@ -39,11 +39,6 @@ TestCase subclass: SocketTest
       handlerConfig: config
       span: nil
 
-  /// The raw reason of a failed FFI `Result` (BT-3954).
-  reasonOf: result :: Result -> Object =>
-    error := result error
-    error reason
-
   /// This process's `monitored_by` list.
   monitoredBy -> List =>
     (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
@@ -63,7 +58,12 @@ TestCase subclass: SocketTest
     client := self connect
     sock := self accept
     self assert: sock close isOk
-    self assert: (self reasonOf: ((Erlang gen_tcp) recv: client with: 0)) equals: #closed
+    self
+      assert: (TCPTransport
+        recv: client
+        length: 0
+        timeout: 5000) error
+      equals: #closed
     (Erlang gen_tcp) close: client
 
   // ===== behaviour specific to gen_tcp =====
@@ -138,7 +138,7 @@ TestCase subclass: SocketTest
       sendfile: "test/fixtures/no_such_file"
       offset: 0
       length: 0
-    self assert: (self reasonOf: result) equals: #enoent
+    self assert: result error equals: #enoent
     sock close
     (Erlang gen_tcp) close: client
 
@@ -147,8 +147,8 @@ TestCase subclass: SocketTest
     client := self connect
     sock := self acceptWith: (HandlerConfig new withReadTimeout: 50)
     self assert: sock readTimeout equals: 50
-    self assert: (self reasonOf: sock recv) equals: #timeout
-    self assert: (self reasonOf: (sock recv: 0 timeout: 10)) equals: #timeout
+    self assert: (sock recv) error equals: #timeout
+    self assert: (sock recv: 0 timeout: 10) error equals: #timeout
     sock close
     (Erlang gen_tcp) close: client
 
@@ -165,7 +165,12 @@ TestCase subclass: SocketTest
     client := self connect
     sock := self accept
     self assert: (sock shutdown: #write) isOk
-    self assert: (self reasonOf: ((Erlang gen_tcp) recv: client with: 0)) equals: #closed
+    self
+      assert: (TCPTransport
+        recv: client
+        length: 0
+        timeout: 5000) error
+      equals: #closed
     sock close
     (Erlang gen_tcp) close: client
 
@@ -202,6 +207,13 @@ TestCase subclass: SocketTest
     self assert: (sock upgrade: TCPTransport options: #()) error equals: #unsupported_upgrade
     sock close
     (Erlang gen_tcp) close: client
+
+  testTransportErrorsAreBareReasons =>
+    sock := (TCPTransport listen: 0 options: #()) unwrap
+    TCPTransport close: sock
+    error := (TCPTransport sockname: sock) error
+    self deny: (error isKindOf: Exception)
+    self assert: (error isKindOf: Symbol)
 
   testTCPTransportConformsToTransport =>
     self assert: (TCPTransport conformsTo: #Transport)

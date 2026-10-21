@@ -74,6 +74,15 @@ Two Beamtalk facts that shape the code (from `docs/ADR/0043`, `0065`):
   test transports and any class-side helper that touches a socket or
   `self()` are `sealed Object subclass:` with `class sealed` methods. No
   diagnostic catches a transport that forgets (BT-4031).
+- **Transport errors are bare reasons** (decided in Phase 2). Every
+  `Result`-returning method of the `Transport` protocol, its
+  implementations and `Socket`'s wrappers answers the raw Erlang reason on
+  the error side (`#closed`, `#timeout`, `#econnreset`; a Tuple for some
+  SSL alerts), as Thousand Island's `{:error, reason}` does. An FFI
+  `{error, R}` arrives as an Exception (ADR 0076), so each implementation
+  normalises it once at the boundary with `mapError: [:e | e reason]`
+  (`TCPTransport bare:`); stubs answer `Result error: #not_secure`.
+  Callers compare `r error` directly, never `r error reason`.
 - **No `receive` in Beamtalk.** Thousand Island cancels its read timer *and*
   flushes a stale `:read_timeout` from the mailbox. Instead, every timer
   message carries a unique ref (`erlang:make_ref`) stored in state; a
@@ -164,14 +173,13 @@ Bandit depends on:
 `negotiatedProtocol`, `connectionInformation`, `telemetrySpan`, `readTimeout`.
 The last two are read directly by Bandit, so they must be plain accessors.
 
-Expected failures return `Result` (ADR 0060); misuse raises. Note ADR 0076
-coercion: `gen_tcp:send` returning `ok` arrives as `Result ok: nil`, and
-`{error, closed}` arrives as a `Result error:` wrapping an Exception, so
-`handleError:` receives an Exception (kind `#runtime_error`, message
-`"closed"`) rather than the raw atom; `e reason` gives back `#closed`
-(BT-3954). Document this difference. The type checker currently types that
-error side as the raw Symbol, so `r error reason` warns (BT-4023); expect a
-few `@expect dnu` until it is fixed.
+Expected failures return `Result` (ADR 0060); misuse raises. `gen_tcp:send`
+returning `ok` arrives as `Result ok: nil` (ADR 0076). On the error side,
+transports answer the bare Erlang reason (`#closed`), as Thousand Island
+does, so `handleError:` receives the raw reason too: see "Transport errors
+are bare reasons" above. Raw FFI calls outside a transport still answer an
+Exception (`r error reason`, BT-3954), which the checker mistypes as the
+raw Symbol (BT-4023).
 
 ## Phases
 
@@ -240,9 +248,9 @@ below.
   new`/`new:` in a direct-called class method raises badarg (BT-4029), so
   `ServerConfig fromOptions:` stays an open class method and `Socket wrap:...`
   uses the keyword constructor.
-- Stub errors are Beamtalk Symbols (`Result error: #not_secure`) while FFI
-  errors are Exceptions (`e reason =:= #closed`). Phase 3's `handleError:`
-  must accept both.
+- Transport errors were Exceptions for FFI failures and Symbols for stubs;
+  Phase 2 made them all bare reasons (see "Transport errors are bare
+  reasons" above).
 - Tests: the server and `Handler` come in Phases 2-3, so `SocketTest` plays
   the handler itself (accepts on a raw listen socket and wraps the
   connection), and its telemetry cases move to Phase 5. The large-file
@@ -276,8 +284,9 @@ The plan as written:
 
 ### Phase 2: Supervision tree, Listener, Acceptor, Connection (`listener_test`, `acceptor_test`, `connection_test`, `socket_reuse_test`) — done (BT-4027)
 
-65 tests in all, 29 of them new: `ListenerTest` 10, `AcceptorTest` 5,
-`ConnectionTest` 1, `SocketReuseTest` 5, and `ServerTest` 9. `ServerTest`
+66 tests in all, 30 of them new: `ListenerTest` 10, `AcceptorTest` 5,
+`ConnectionTest` 1, `SocketReuseTest` 5, `ServerTest` 9, plus one new
+`SocketTest` case for bare transport errors. `ServerTest`
 covers the tree's shape, two independent servers on one node (stopping
 one leaves the other serving), named servers, start errors, and acceptors
 ending normally when the listener stops. The tree, the hang rule and the
@@ -303,10 +312,10 @@ child lookups are as designed below. Deviations:
   it in Phase 5, as do all telemetry events (the acceptor's `spawn_error`,
   `econnaborted`, `accept_error` and `emfile`). The Elixir tests' telemetry
   assertions move to Phase 5; the behaviour they accompany is tested here.
-- `ErrorReason of:` (new, `src/error_reason.bt`) normalises a transport
-  error: an Exception from FFI, or a plain value from a Beamtalk-built
-  `Result error:` such as a fake transport's. The acceptor classifies
-  `accept` errors with it.
+- Transport errors are now bare Erlang reasons everywhere (the new rule
+  under "Two Beamtalk facts"), so the acceptor classifies `accept` errors
+  by comparing `result error` directly, and Phase 1's tests compare errors
+  rather than `error reason`.
 - Tests use small stand-in handlers in `test/fixtures/` (`EchoHandler`,
   `WaitingHandler`, `FailInitHandler`) until `Handler` arrives. The
   `:ignore` case of the failing-handler test has no Beamtalk counterpart,

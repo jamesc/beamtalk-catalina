@@ -45,7 +45,7 @@ sealed Object subclass: Connection
         // then terminate the idle handler.
         transport close: rawSocket
         connections terminateChild: handler
-        ^Result error: {#controlling_process, ErrorReason of: handedOff error}
+        ^Result error: {#controlling_process, handedOff error}
       ]
     Erlang erlang send: handler pid msg: {#catalina_ready, rawSocket, handlerConfig, span, startTime}
     Result ok: nil

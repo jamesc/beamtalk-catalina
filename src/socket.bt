@@ -8,10 +8,9 @@
 /// A Socket is an immutable value. Calls that change the underlying socket
 /// (`handshake`, `upgrade:options:`) answer a new Socket inside a `Result`.
 ///
-/// Expected failures answer `Result error:`. An error from the transport's
-/// Erlang call is an Exception, not the bare atom Elixir code sees: match
-/// `e reason` (`#closed`, `#timeout`, `#econnreset`, ...), as in
-/// `(sock recv: 0) ifError: [:e | e reason]`.
+/// Expected failures answer `Result error:` with the transport's bare
+/// Erlang reason (`#closed`, `#timeout`, `#econnreset`, ...; see
+/// `Transport`), as in `(sock recv: 0) error =:= #closed`.
 ///
 /// `peername` answers the address captured when the connection was
 /// accepted, so it still works after the client has reset the connection.

@@ -73,7 +73,7 @@ Server subclass: Acceptor
     result := self.config transport accept: self.listenSocket
     result isOk ifTrue: [
       self onAccepted: result value
-    ] ifFalse: [self onAcceptError: (ErrorReason of: result error)]
+    ] ifFalse: [self onAcceptError: result error]
 
   onAccepted: rawSocket =>
     self.count := self.count + 1
