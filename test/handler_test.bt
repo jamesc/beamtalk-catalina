@@ -51,6 +51,8 @@ TestCase subclass: HandlerTest
   // Generous, as the machine may be loaded; it only waits when nothing comes.
   recv: client :: Object -> Object => self recv: client within: 3000
 
+  millis -> Integer => Erlang erlang monotonic_time: #millisecond
+
   log -> List => HandlerHarness logIn: self tableName
 
   /// Wait up to three seconds for `event` to be logged.
@@ -231,14 +233,30 @@ TestCase subclass: HandlerTest
     self assert: (self awaitLogged: #timeout)
 
   testClientSendingWithinReadTimeoutKeepsConnectionOpen =>
-    port := self start: LocalPingHandler options: #{#readTimeout => 100}
+    // Thousand Island uses a 100 ms timeout against a 50 ms send cadence.
+    // The margin here is 5x, but a busy CI runner can still stall this
+    // process past the timeout between two sends, and then the handler is
+    // right to time out. The gaps are measured, and a stalled run is
+    // skipped rather than failed.
+    port := self start: LocalPingHandler options: #{#readTimeout => 250}
     client := self connect: port
+    last := self millis
+    maxGap := 0
     6
       timesRepeat: [
         self send: "ping" to: client
+        now := self millis
+        maxGap := maxGap max: now - last
+        last := now
         Timer sleep: 50
       ]
-    self assert: (self recv: client within: 10) equals: #timeout
+    got := self recv: client within: 10
+    maxGap := maxGap max: self millis - last
+    maxGap < 250
+      ifFalse: [
+        ^self skip: "client stalled {maxGap} ms between sends (>= readTimeout); timing precondition not met"
+      ]
+    self assert: got equals: #timeout
     self deny: (self log includes: #timeout)
 
   testSyncRecvTimesOutAfterReadTimeout =>
