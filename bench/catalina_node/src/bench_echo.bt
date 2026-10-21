@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The bench's echo handler: every packet goes back, as the Thousand Island
+/// baseline's `BenchEcho`.
+typed Handler subclass: BenchEcho
+
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    sock send: data
+    HandlerResult continue: st

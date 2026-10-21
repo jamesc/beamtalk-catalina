@@ -19,7 +19,10 @@
 /// error the socket is closed, and after a failed handoff the idle handler
 /// is terminated too.
 ///
-/// A handler is started with `#{#handlerOptions => config handlerOptions}`.
+/// A handler is started with `#{#handlerOptions => config handlerOptions,
+/// #acceptor => the acceptor's pid}`; the handler monitors the acceptor
+/// until the ready message arrives, so it stops if the acceptor dies in
+/// between.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -34,7 +37,10 @@ sealed typed Object subclass: Connection
     transport := handlerConfig transport
     started := self
       startChildOn: connections
-      args: #{#handlerOptions => config handlerOptions}
+      args: #{
+        #handlerOptions => config handlerOptions,
+        #acceptor => Erlang erlang self
+      }
       retries: config maxConnectionsRetryCount
       wait: config maxConnectionsRetryWait
     started isError

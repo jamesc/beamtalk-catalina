@@ -20,6 +20,22 @@ spikes:
     cat _build/spikes/echo_bench.txt 2>/dev/null && echo
     exit $status
 
+# Benchmark Catalina against Thousand Island, interleaved (README § Benchmarks and stress tests)
+bench *ARGS:
+    bench/run.sh bench_main {{ARGS}}
+
+# Correctness under load and failure (test/stress/; not part of `test`)
+stress *ARGS:
+    bench/run.sh stress_main {{ARGS}}
+
+# A one-round bench on a few rows, as CI runs it (non-blocking)
+bench-smoke:
+    bench/run.sh bench_main --rounds 1 --duration 1000 --warmup 300 --rows smoke
+
+# The stress tests at smoke sizes with a one-minute soak, as CI runs them (non-blocking)
+stress-smoke:
+    bench/run.sh stress_main --smoke
+
 # Check formatting
 fmt:
     beamtalk fmt-check

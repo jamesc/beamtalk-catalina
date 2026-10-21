@@ -7,6 +7,11 @@ catalina/
 ├── beamtalk.toml          # Package manifest and dependencies
 ├── src/                   # Source files (.bt), one class per file
 ├── test/                  # BUnit tests (TestCase subclasses)
+│   └── stress/            # Erlang stress tests (just stress; not in just test)
+├── bench/                 # just bench: Catalina vs Thousand Island
+│   ├── harness/           # Erlang load generator and peer-node driver
+│   ├── catalina_node/     # the Catalina side (a package: echo handlers)
+│   └── thousand_island/   # the Thousand Island 1.6.0 baseline (mix project)
 ├── _build/                # Build output (generated, gitignored)
 ├── Justfile               # just build / test / fmt / lint / ci
 ├── AGENTS.md              # This file

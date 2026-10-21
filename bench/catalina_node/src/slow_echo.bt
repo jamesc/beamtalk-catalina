@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// An echo handler that sleeps before each echo, for the lifecycle stress
+/// tests: the server's `handlerOptions` is the sleep in milliseconds, as the
+/// Thousand Island baseline's `TiNode.SlowEcho`.
+typed Handler subclass: SlowEcho
+
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    (st isKindOf: Integer) ifTrue: [Timer sleep: st]
+    sock send: data
+    HandlerResult continue: st

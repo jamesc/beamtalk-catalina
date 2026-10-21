@@ -19,6 +19,8 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: "28.5"
+          # For the Thousand Island baseline of the bench and stress smoke steps.
+          elixir-version: "1.20.1"
 
       - name: Install Beamtalk
         # edge tracks beamtalk main per merge; catalina depends on unreleased stdlib work (BT-3957)
@@ -45,4 +47,14 @@ jobs:
       # Phase 0 spikes: loopback sockets and timing, informational only.
       - name: Spikes
         run: just spikes
+        continue-on-error: true
+
+      # BT-4051: short versions of `just bench` and `just stress`. Shared
+      # runners make the numbers noisy, so these are informational only.
+      - name: Bench smoke
+        run: just bench-smoke
+        continue-on-error: true
+
+      - name: Stress smoke
+        run: just stress-smoke
         continue-on-error: true

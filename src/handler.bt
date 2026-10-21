@@ -85,12 +85,22 @@ typed Server subclass: Handler
   // Monotonic milliseconds.
   state: readDeadline :: Integer | Nil = nil
   state: timerDeadline :: Integer | Nil = nil
+  // The acceptor that started this handler (`#acceptor` in the start args;
+  // nil when started some other way), monitored until the ready message
+  // arrives. If it dies first, the ready message never comes, and without
+  // the monitor this handler would wait for it forever.
+  state: acceptor :: Pid | Nil = nil
+  state: acceptorMonitor :: Reference | Nil = nil
 
   /// Handlers are never restarted: a connection that ends is gone.
   class supervisionPolicy -> RestartStrategy => #temporary
 
   initialize -> Nil =>
     self.userState := self.handlerOptions
+    starter := self.acceptor
+    starter isNil ifFalse: [
+      self.acceptorMonitor := Erlang erlang monitor: #process with: starter
+    ]
     nil
 
   // === Callbacks ===
@@ -159,10 +169,12 @@ typed Server subclass: Handler
         from: raw
         message: msg;
       {#catalina_read_timeout, tag} -> self onReadTimeout: tag;
+      {#DOWN, ref, #process, _pid, _reason} -> self onDown: ref message: msg;
       _ -> self handleUserInfo: msg
     ]
 
   onReady: raw :: Object config: config :: HandlerConfig span: acceptorSpan :: CatalinaTelemetry | Nil start: start :: Integer -> Nil =>
+    self stopWatchingAcceptor
     transport := config transport
     peer := transport peername: raw
     peer isError
@@ -221,6 +233,22 @@ typed Server subclass: Handler
       self handleConnection: sock state: self.userState
     ] on: Exception do: [:e | self raised: e on: sock]
     self handleContinuation: result
+
+  /// The acceptor died between starting this handler and handing it the
+  /// socket (killed, say): the ready message will never come, so stop. The
+  /// socket, if it was already handed over, closes with this process. Any
+  /// other `DOWN` is the subclass's own monitor.
+  onDown: ref :: Reference message: msg :: Object -> Object =>
+    ref =:= self.acceptorMonitor ifFalse: [^self handleUserInfo: msg]
+    self.acceptorMonitor := nil
+    self stopWith: {#shutdown, #acceptor_down}
+    nil
+
+  stopWatchingAcceptor -> Nil =>
+    ref := self.acceptorMonitor
+    ref isNil ifFalse: [Erlang erlang demonitor: ref with: #(#flush)]
+    self.acceptorMonitor := nil
+    nil
 
   // A socket message for another socket, or one before the ready message,
   // goes to `handleUserInfo:`.

@@ -625,6 +625,13 @@ Deviations:
   `continueWith:`. The handler's internal method is `continueReading:`
   because `continueWith:` is sealed on `Actor`.
 - The process label is `{catalina_connection, {ip, port}}` (`proc_lib:set_label/1`).
+- A handler monitors the acceptor that started it (`#acceptor` in its start
+  args) until the ready message arrives, and stops with `{shutdown,
+  acceptor_down}` if the acceptor dies first. Thousand Island's handler
+  waits for `:thousand_island_ready` with no timeout, so an acceptor
+  killed between `start_child` and the send leaves the handler waiting
+  forever; Catalina's slower handoff made that window wide enough for the
+  BT-4051 chaos stress test to hit it (`chaos_acceptor_killed_mid_handoff`).
 - The Phase 2 stand-ins `EchoHandler` and `FailInitHandler` are now
   `Handler` subclasses, and `ConnectionSupervisor` is
   `DynamicSupervisor(Handler)`. `WaitingHandler` stays a raw `Server`,

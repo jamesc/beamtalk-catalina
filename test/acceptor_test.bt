@@ -10,20 +10,25 @@
 /// raising one is ported.
 TestCase subclass: AcceptorTest
 
-  setUp =>
-    FlakyTransport acceptResults: #()
-    FlakyTransport controllingProcessResults: #()
-    self
-
   /// The accept(2) retry list, plus `etimedout` and `einval`.
   transientErrors -> List =>
     #(#enetdown, #enetunreach, #ehostdown, #ehostunreach, #enonet, #eproto, #enoprotoopt, #eopnotsupp, #etimedout, #einval)
 
   start: options :: Dictionary -> ServerSupervisor =>
-    (Catalina start: ((options at: #port put: 0) at: #numAcceptors put: 1)) unwrap
+    withPort := (options includesKey: #port) ifTrue: [
+      options
+    ] ifFalse: [options at: #port put: 0]
+    (Catalina start: (withPort at: #numAcceptors put: 1)) unwrap
 
   startFlaky =>
     self start: #{#handler => EchoHandler, #transport => FlakyTransport}
+
+  startFlakyOn: port :: Integer =>
+    self start: #{
+      #handler => EchoHandler,
+      #transport => FlakyTransport,
+      #port => port
+    }
 
   portOf: srv :: ServerSupervisor -> Integer => srv listenerInfo unwrap at: 2
 
@@ -39,7 +44,7 @@ TestCase subclass: AcceptorTest
     ((Erlang gen_tcp)
       recv: client
       with: 0
-      with: 1000) unwrap
+      with: 5000) unwrap
 
   /// The acceptor processes, observed through their supervisors (the
   /// acceptors themselves are never called).
@@ -58,7 +63,7 @@ TestCase subclass: AcceptorTest
     self assert: (self echo: "FIRST" on: existing) equals: "FIRST"
     // Five failures is past the acceptor's restart budget, so crashing on
     // each would take down its supervisor and its connections.
-    FlakyTransport acceptResults: #(#emfile, #enfile, #emfile, #enfile, #emfile)
+    FlakyTransport acceptResults: #(#emfile, #enfile, #emfile, #enfile, #emfile) port: port
     fresh := self connect: port
     Timer sleep: 800
     self assert: (self echo: "STILL HERE" on: existing) equals: "STILL HERE"
@@ -75,7 +80,7 @@ TestCase subclass: AcceptorTest
     accSups := srv acceptorSupervisors
     existing := self connect: port
     self assert: (self echo: "FIRST" on: existing) equals: "FIRST"
-    FlakyTransport acceptResults: self transientErrors
+    FlakyTransport acceptResults: self transientErrors port: port
     fresh := self connect: port
     Timer sleep: 300
     self assert: (self echo: "STILL HERE" on: existing) equals: "STILL HERE"
@@ -108,15 +113,16 @@ TestCase subclass: AcceptorTest
     srv stop
 
   testAnOwnershipTransferFailureIsSurvivedAndTheNextConnectionServed =>
-    FlakyTransport controllingProcessResults: #(#badarg)
-    srv := self startFlaky
-    port := self portOf: srv
+    port := FlakyTransport freePort
+    FlakyTransport controllingProcessResults: #(#badarg) port: port
+    srv := self startFlakyOn: port
     before := self acceptorPids: srv
     rejected := self connect: port
+    // A generous bound: on a loaded machine the handoff can take a while.
     result := TCPTransport
       recv: rejected
       length: 0
-      timeout: 1000
+      timeout: 5000
     self assert: result error equals: #closed
     (Erlang gen_tcp) close: rejected
     accepted := self connect: port
@@ -130,11 +136,16 @@ TestCase subclass: AcceptorTest
     srv := self startFlaky
     port := self portOf: srv
     before := self acceptorPids: srv
-    FlakyTransport acceptResults: #(#something_new)
+    FlakyTransport acceptResults: #(#something_new) port: port
+    // The acceptor may already be blocked in a real accept, queued before
+    // the error was: then it serves this client and meets the error on its
+    // next accept. Either way, by the time the second client is served the
+    // acceptor has raised and its supervisor has restarted it.
+    first := self connect: port
+    self assert: (self echo: "FIRST" on: first) equals: "FIRST"
     client := self connect: port
-    // The acceptor raised and its supervisor restarted it; the new one
-    // serves the client still waiting in the backlog.
     self assert: (self echo: "AGAIN" on: client) equals: "AGAIN"
     self deny: (self acceptorPids: srv) =:= before
+    (Erlang gen_tcp) close: first
     (Erlang gen_tcp) close: client
     srv stop
