@@ -92,14 +92,4 @@ sealed typed Value subclass: HandlerResult
     (self kind: #error state: st) withReason: reason
 
   class sealed kind: kind :: #continue | #switchTransport | #close | #error state: st :: Object -> HandlerResult =>
-    // The keyword constructor, not `new:`, which raises in a direct-called
-    // class method (BT-4029).
-    HandlerResult
-      kind: kind
-      state: st
-      timeout: nil
-      persistent: false
-      then: nil
-      transport: nil
-      options: nil
-      reason: nil
+    self new: #{#kind => kind, #state => st}

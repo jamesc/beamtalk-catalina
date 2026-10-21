@@ -41,8 +41,6 @@ sealed typed Value subclass: Socket
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
   class sealed wrap: rawSocket :: Object peername: peer :: Object handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Socket =>
-    // The keyword constructor, not `new:`, which raises in a direct-called
-    // class method (BT-4029).
     Socket
       socket: rawSocket
       transport: handlerConfig transport

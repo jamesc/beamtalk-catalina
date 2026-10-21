@@ -59,10 +59,7 @@ sealed typed Value subclass: ServerConfig
   /// unknown option, a missing `handler`, more listen sockets than
   /// acceptors, or several listen sockets without `reuseport` or
   /// `reuseport_lb` in `transportOptions`.
-  class fromOptions: options :: Dictionary -> ServerConfig =>
-    // Not `class sealed`: `self new:` in a direct-called class method
-    // raises badarg (BT-4029), so this runs in the class process. It is
-    // pure, so that costs only the hop.
+  class sealed fromOptions: options :: Dictionary -> ServerConfig =>
     self validateKeys: options
     config := self new: options
     self validateHandler: config
@@ -72,8 +69,8 @@ sealed typed Value subclass: ServerConfig
 
   /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
   /// unknown option is a typo the user should hear about, as Elixir's
-  /// `struct!/2` reports it. Not `class sealed`, for `self new` (BT-4029).
-  class validateKeys: options :: Dictionary -> Nil =>
+  /// `struct!/2` reports it.
+  class sealed validateKeys: options :: Dictionary -> Nil =>
     known := self new fieldNames
     options keys
       do: [:key |

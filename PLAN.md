@@ -282,10 +282,9 @@ below.
   detects it with `respondsTo:`, so it is documented on the protocol rather
   than required by it.
 - Transports are sealed with `class sealed` methods (see "Two Beamtalk facts"
-  above). Two class-side constructors cannot be `class sealed` yet: `self
-  new`/`new:` in a direct-called class method raises badarg (BT-4029), so
-  `ServerConfig fromOptions:` stays an open class method and `Socket wrap:...`
-  uses the keyword constructor.
+  above). Until BT-4029 was fixed, `self new`/`new:` in a direct-called class
+  method raised badarg, so `ServerConfig fromOptions:` was an open class
+  method; it is `class sealed` now.
 - Transport errors were Exceptions for FFI failures and Symbols for stubs;
   Phase 2 made them all bare reasons (see "Transport errors are bare
   reasons" above).
