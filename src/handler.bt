@@ -358,7 +358,10 @@ typed Server subclass: Handler
     nil
 
   // === Read timeout ===
+  diagTimer: info :: Object -> Object => nil
+
   armReadTimer: timeout :: Integer | #infinity -> Nil =>
+    self diagTimer: {#arm, self now, timeout, self.readDeadline, self.timerDeadline}
     timeout =:= #infinity ifTrue: [^self cancelReadTimer]
     ms := timeout
     deadline := self now + ms
@@ -398,6 +401,7 @@ typed Server subclass: Handler
   /// A timer fired. A stale one (cancelled, or replaced) is ignored; an
   /// early one re-arms for the rest of the deadline.
   onReadTimeout: tag :: Reference -> Nil =>
+    self diagTimer: {#fire, self now, tag =:= self.timerTag, self.readDeadline, self.timerDeadline}
     tag =:= self.timerTag ifFalse: [^nil]
     deadline := self.readDeadline
     self.readTimer := nil

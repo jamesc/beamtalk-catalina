@@ -21,3 +21,5 @@ RecordingHandler subclass: LocalPingHandler
       send: #localPing
       to: self
       after: 10
+
+  diagTimer: info :: Object -> Object => self note: info
