@@ -77,7 +77,7 @@ typed Server subclass: Acceptor
     self.connections := sup
     patient := listener withTimeout: 15000
     self.listenSocket := patient acceptorInfo: self.id
-    parentSpan :: CatalinaTelemetry := patient listenerSpan
+    parentSpan := patient listenerSpan
     self.span := parentSpan startChild: #acceptor
     patient stop
     self.handlerConfig := HandlerConfig fromServerConfig: self.config

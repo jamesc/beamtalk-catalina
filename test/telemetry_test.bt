@@ -23,14 +23,14 @@ TestCase subclass: TelemetryTest
     (Ets named: self tableName) delete
 
   /// Record `handler`'s events, then start a server for it.
-  start: handler :: Class options: options :: Dictionary -> Integer =>
+  start: handler :: Handler class options: options :: Dictionary -> Integer =>
     TelemetryCollector attachAll: handler table: self tableName
     HandlerHarness
       start: handler
       options: options
       table: self tableName
 
-  start: handler :: Class -> Integer => self start: handler options: #{}
+  start: handler :: Handler class -> Integer => self start: handler options: #{}
 
   connect: port :: Integer -> Object =>
     ((Erlang gen_tcp)
@@ -70,6 +70,16 @@ TestCase subclass: TelemetryTest
     m
 
   isReference: value :: Object -> Boolean => value isKindOf: Reference
+
+  /// The last element of each `#connection` event's name, in order.
+  connectionEventNames -> List(Symbol) =>
+    names := #()
+    (TelemetryCollector eventsIn: self tableName)
+      do: [:e |
+        name :: List(Symbol) := e at: 1
+        (name at: 2) =:= #connection ifTrue: [names := names add: name last]
+      ]
+    names
 
   // ===== telemetry_test.exs =====
   testStartSpansKeepCallerSuppliedTimes =>
@@ -169,7 +179,7 @@ TestCase subclass: TelemetryTest
     client := self connect: port
     local := ((Erlang inet) sockname: client) unwrap
     event := self await: #connection named: #start
-    self assert: ((self measurementsOf: event) at: #system_time) isKindOf: Integer
+    self assert: (((self measurementsOf: event) at: #system_time) isKindOf: Integer)
     metadata := self metadataOf: event
     self assert: (metadata at: #handler) equals: TelemetryCloser
     self assert: (self isReference: (metadata at: #parent_telemetry_span_context))
@@ -180,11 +190,7 @@ TestCase subclass: TelemetryTest
     port := self start: TelemetryCloser
     self connect: port
     self deny: (self await: #connection named: #ready) isNil
-    names := (TelemetryCollector eventsIn: self tableName) collect: [:e |
-      (e at: 1) last
-    ]
-    connectionEvents := names select: [:n | #(#start, #ready) includes: n]
-    self assert: (connectionEvents first: 2) asList equals: #(#start, #ready)
+    self assert: (self connectionEventNames take: 2) equals: #(#start, #ready)
 
   testAsyncRecvEvent =>
     port := self start: TelemetryCloseOnData
@@ -265,7 +271,7 @@ TestCase subclass: TelemetryTest
     (Erlang gen_tcp) send: client with: "HELLO"
     (Erlang gen_tcp) send: other with: "BONJOUR"
     event := self await: #acceptor named: #spawn_error
-    self assert: ((self measurementsOf: event) at: #monotonic_time) isKindOf: Integer
+    self assert: (((self measurementsOf: event) at: #monotonic_time) isKindOf: Integer)
 
   testListenerAndAcceptorSpansOnStartAndStop =>
     self start: EchoHandler
@@ -273,10 +279,16 @@ TestCase subclass: TelemetryTest
     acceptorStart := self await: #acceptor named: #start
     acceptorMetadata := self metadataOf: acceptorStart
     self assert: (acceptorMetadata at: #parent_telemetry_span_context) equals: (listenerStart at: #telemetry_span_context)
-    (HandlerHarness serverIn: self tableName) stop
+    // Stop the listener first, as the shutdown listener does, so the
+    // acceptor sees `closed` and stops its span. In a whole-server `stop`
+    // that races with the supervisor killing the acceptor, in Thousand
+    // Island as here.
+    srv := HandlerHarness serverIn: self tableName
+    srv listener unwrap stop
     acceptorStop := self await: #acceptor named: #stop
     self assert: ((self measurementsOf: acceptorStop) at: #connections) equals: 0
     self deny: (self await: #listener named: #stop) isNil
+    srv stop
 
   // ===== socket_test.exs (SSL) =====
   testStalledHandshakeStartsButIsNeverReady =>
@@ -303,12 +315,7 @@ TestCase subclass: TelemetryTest
       }
     client := (HandlerHarness tlsConnect: port options: #()) unwrap
     self deny: (self await: #connection named: #ready) isNil
-    names := (TelemetryCollector eventsIn: self tableName) collect: [:e |
-      (e at: 1) last
-    ]
-    self assert: ((names select: [:n |
-      #(#start, #ready) includes: n
-    ]) first: 2) asList equals: #(#start, #ready)
+    self assert: (self connectionEventNames take: 2) equals: #(#start, #ready)
     SSLTransport close: client
 
   testExactlyOneStopWhenTheHandshakeFails =>

@@ -171,7 +171,7 @@ sealed typed Value subclass: Socket
   telemetrySpan -> CatalinaTelemetry | Nil => self.span
 
   /// An event on the connection span, with the time (`span_event/4`).
-  event: name :: Symbol measurements: measurements :: Dictionary -> Nil =>
+  event: name :: Symbol measurements: measurements :: Dictionary -> Socket =>
     span := self.span
     span isNil
       ifFalse: [
@@ -180,11 +180,11 @@ sealed typed Value subclass: Socket
           measurements: measurements
           metadata: #{}
       ]
-    nil
+    self
 
   /// An event on the connection span, without the time
   /// (`untimed_span_event/4`).
-  untimed: name :: Symbol measurements: measurements :: Dictionary -> Nil =>
+  untimed: name :: Symbol measurements: measurements :: Dictionary -> Socket =>
     span := self.span
     span isNil
       ifFalse: [
@@ -193,4 +193,4 @@ sealed typed Value subclass: Socket
           measurements: measurements
           metadata: #{}
       ]
-    nil
+    self

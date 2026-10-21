@@ -93,12 +93,12 @@ sealed typed Value subclass: CatalinaTelemetry
       metadata: #{}
 
   /// Stop the span (`stop_span/3`) with no extra measurements or metadata.
-  stop -> Nil => self stopWith: #{} metadata: #{}
+  stop -> CatalinaTelemetry => self stopWith: #{} metadata: #{}
 
   /// Emit `stop` with `#duration`, unless an `exception` already ended the
-  /// span in this process.
-  stopWith: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
-    (Erlang erlang erase: self exceptionMarker) =:= true ifTrue: [^nil]
+  /// span in this process. Answers the span, as every event method does.
+  stopWith: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+    (Erlang erlang erase: self exceptionMarker) =:= true ifTrue: [^self]
     now := (measurements at: #monotonic_time ifAbsent: [
       nil
     ]) ifNil: [CatalinaTelemetry monotonicTime]
@@ -110,8 +110,10 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// Emit `exception` (once per span and process) with `#duration`, `kind`,
   /// `reason` and `stacktrace`.
-  exceptionKind: kind :: Symbol reason: reason :: Object stacktrace: stacktrace :: Object -> Nil =>
-    (Erlang erlang put: self exceptionMarker with: true) =:= true ifTrue: [^nil]
+  exceptionKind: kind :: Symbol reason: reason :: Object stacktrace: stacktrace :: Object -> CatalinaTelemetry =>
+    (Erlang erlang put: self exceptionMarker with: true) =:= true ifTrue: [
+      ^self
+    ]
     now := CatalinaTelemetry monotonicTime
     metadata := self.startMetadata merge: #{
       #kind => kind,
@@ -124,7 +126,7 @@ sealed typed Value subclass: CatalinaTelemetry
       metadata: metadata
 
   /// An event that adds `#monotonic_time` (`span_event/4`).
-  event: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+  event: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
     timed := (measurements includesKey: #monotonic_time) ifTrue: [
       measurements
     ] ifFalse: [
@@ -137,12 +139,13 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// An event with the span's context and handler in its metadata
   /// (`untimed_span_event/4`).
-  untimedEvent: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+  untimedEvent: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
     CatalinaTelemetry
       emit: self.spanName
       name: name
       measurements: measurements
       metadata: (metadata merge: self.spanMetadata)
+    self
 
   /// The process-dictionary key marking that this span ended with an
   /// exception.
