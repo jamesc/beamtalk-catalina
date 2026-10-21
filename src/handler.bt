@@ -358,7 +358,7 @@ typed Server subclass: Handler
     nil
 
   // === Read timeout ===
-  diagTimer: info :: Object -> Object => nil
+  diagTimer: info :: Object -> Object => info
 
   armReadTimer: timeout :: Integer | #infinity -> Nil =>
     self diagTimer: {#arm, self now, timeout, self.readDeadline, self.timerDeadline}
