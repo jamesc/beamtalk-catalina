@@ -1,0 +1,91 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Transport — the socket operations Catalina needs from a transport, as in
+/// Thousand Island's `ThousandIsland.Transport` behaviour.
+///
+/// A transport is a class with class-side methods only (`TCPTransport`,
+/// later `SSLTransport`), so every requirement here is a `class` method.
+/// Conformance is structural: a class conforms when it answers all of them.
+///
+/// Expected failures answer `Result error:`. An `{error, R}` from the
+/// underlying Erlang call arrives as an Exception whose `reason` is `R`
+/// (ADR 0076, BT-3954); a stub's own error (`#not_secure`) is the Symbol
+/// itself.
+///
+/// **Seal the class and every class method** (`sealed Object subclass:`,
+/// `class sealed`). A class method of an open or stateful class runs in the
+/// class's own process, not the caller's (ADR 0129), and socket calls must
+/// run in the caller: `controllingProcess:pid:` and `sendfile:...` only work
+/// from the socket's owner, and a blocking `accept:` or `recv:...` in the
+/// class process would serialise every acceptor and handler behind one
+/// process.
+///
+/// A transport may also answer `handshake:timeout:`. `Socket handshake`
+/// prefers it when present and otherwise falls back to `handshake:`, as
+/// Thousand Island does with its optional `handshake/2` callback.
+///
+/// ## Examples
+/// ```beamtalk
+/// TCPTransport conformsTo: #Transport   // => true
+/// ```
+Protocol define: Transport
+  /// Open a listen socket on `port` (0 for an ephemeral port).
+  class listen: port :: Integer options: options :: List -> Result
+
+  /// Wait for a connection on a listen socket.
+  class accept: listenSocket :: Object -> Result
+
+  /// Complete the transport's handshake on a new connection (TLS); a clear
+  /// transport answers the socket unchanged.
+  class handshake: socket :: Object -> Result
+
+  /// Upgrade an established connection (STARTTLS-style), or answer
+  /// `Result error: #unsupported_upgrade`.
+  class upgrade: socket :: Object options: options :: Object -> Result
+
+  /// Hand the socket to `pid`. Only its current owner may call this.
+  class controllingProcess: socket :: Object pid: pid :: Pid -> Result
+
+  /// Read up to `length` bytes (0: whatever is available), waiting at most
+  /// `timeout` ms (or `#infinity`).
+  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result
+
+  /// Send a String or iodata.
+  class send: socket :: Object data: data :: Object -> Result
+
+  /// Send `length` bytes of a file from `offset` (0 for the rest of it).
+  class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result
+
+  /// Read socket options.
+  class getopts: socket :: Object options: options :: List -> Result
+
+  /// Set socket options.
+  class setopts: socket :: Object options: options :: List -> Result
+
+  /// Shut the connection down in one direction: `#read`, `#write` or `#read_write`.
+  class shutdown: socket :: Object how: way :: Symbol -> Result
+
+  /// Close a connection or listen socket.
+  class close: socket :: Object -> Result
+
+  /// The local `{ip, port}` of a connection or listen socket.
+  class sockname: socket :: Object -> Result
+
+  /// The remote `{ip, port}` of a connection.
+  class peername: socket :: Object -> Result
+
+  /// The peer's DER certificate, or `Result error: #not_secure`.
+  class peercert: socket :: Object -> Result
+
+  /// Whether this transport is encrypted.
+  class isSecure -> Boolean
+
+  /// The socket's `inet:getstat/1` counters.
+  class getstat: socket :: Object -> Result
+
+  /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
+  class negotiatedProtocol: socket :: Object -> Result
+
+  /// The TLS connection information, or `Result error: #not_secure`.
+  class connectionInformation: socket :: Object -> Result

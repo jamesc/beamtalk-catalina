@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `config_test.exs`, plus the defaults and the
+/// unknown-option check.
+TestCase subclass: ServerConfigTest
+
+  /// The message of the error `fromOptions:` raises, or "" if it succeeds.
+  errorFor: options :: Dictionary -> String =>
+    result := Result tryDo: [ServerConfig fromOptions: options]
+    result isError ifTrue: [result error message] ifFalse: [""]
+
+  // ===== server_config exceptions (config_test.exs) =====
+  testRaisesWhenHandlerIsNil =>
+    message := self errorFor: #{#port => 4000, #handler => nil}
+    self assert: (message includesSubstring: "No handler")
+
+  testRaisesWhenNumListenSocketsExceedsNumAcceptors =>
+    message := self
+      errorFor: #{
+        #port => 4000,
+        #handler => ServerConfigTest,
+        #numListenSockets => 5,
+        #numAcceptors => 3
+      }
+    self assert: message equals: "numListenSockets (5) must be less than or equal to numAcceptors (3)"
+
+  testRaisesWhenSeveralListenSocketsWithoutReuseport =>
+    message := self
+      errorFor: #{
+        #port => 4000,
+        #handler => ServerConfigTest,
+        #numListenSockets => 2,
+        #transportOptions => #()
+      }
+    self assert: (message includesSubstring: "reuseport")
+
+  testNumListenSocketsDefaultsToOne =>
+    config := ServerConfig fromOptions: #{#handler => ServerConfigTest}
+    self assert: config numListenSockets equals: 1
+
+  testHandshakeTimeoutDefaultsTo5000AndAcceptsInfinity =>
+    config := ServerConfig fromOptions: #{#handler => ServerConfigTest}
+    self assert: config handshakeTimeout equals: 5000
+    config := ServerConfig fromOptions: #{
+      #handler => ServerConfigTest,
+      #handshakeTimeout => #infinity
+    }
+    self assert: config handshakeTimeout equals: #infinity
+
+  testAllowsNumListenSocketsLessThanNumAcceptors =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 3,
+        #numAcceptors => 10,
+        #transportOptions => #({#reuseport, true})
+      }
+    self assert: config numListenSockets equals: 3
+    self assert: config numAcceptors equals: 10
+
+  testAllowsNumListenSocketsEqualToNumAcceptors =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 5,
+        #numAcceptors => 5,
+        #transportOptions => #({#reuseport, true})
+      }
+    self assert: config numListenSockets equals: 5
+    self assert: config numAcceptors equals: 5
+
+  // ===== Catalina additions =====
+  testAllowsSeveralListenSocketsWithReuseportLb =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #numListenSockets => 2,
+        #transportOptions => #({#reuseport_lb, true})
+      }
+    self assert: config numListenSockets equals: 2
+
+  testRaisesOnUnknownOption =>
+    message := self errorFor: #{#handler => ServerConfigTest, #numAcceptor => 3}
+    self assert: message equals: "Unknown server option: #numAcceptor"
+
+  testDefaultsMatchThousandIsland =>
+    config := ServerConfig fromOptions: #{#handler => ServerConfigTest}
+    self assert: config port equals: 4000
+    self assert: config transport equals: TCPTransport
+    self assert: config transportOptions equals: #()
+    self assert: config handler equals: ServerConfigTest
+    self assert: config handlerOptions equals: #()
+    self assert: config genServerOptions equals: #()
+    self assert: config supervisorOptions equals: #()
+    self assert: config numAcceptors equals: 100
+    self assert: config numListenSockets equals: 1
+    self assert: config numConnections equals: 16384
+    self assert: config maxConnectionsRetryCount equals: 5
+    self assert: config maxConnectionsRetryWait equals: 1000
+    self assert: config readTimeout equals: 60000
+    self assert: config handshakeTimeout equals: 5000
+    self assert: config shutdownTimeout equals: 15000
+    self deny: config silentTerminateOnError
+
+  testHandlerConfigFromServerConfig =>
+    config := ServerConfig
+      fromOptions: #{
+        #handler => ServerConfigTest,
+        #readTimeout => 1000,
+        #handshakeTimeout => #infinity,
+        #silentTerminateOnError => true
+      }
+    handlerConfig := HandlerConfig fromServerConfig: config
+    self assert: handlerConfig handler equals: ServerConfigTest
+    self assert: handlerConfig transport equals: TCPTransport
+    self assert: handlerConfig readTimeout equals: 1000
+    self assert: handlerConfig handshakeTimeout equals: #infinity
+    self assert: handlerConfig silentTerminateOnError

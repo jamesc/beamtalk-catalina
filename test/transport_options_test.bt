@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of the TCP half of Thousand Island's `transport_options_test.exs`
+/// (the SSL half comes with `SSLTransport` in Phase 4), plus the
+/// precedence rules of `Transport.resolve_options/1`.
+///
+/// The Elixir test traces `gen_tcp:listen/2` to see the options it gets.
+/// Here `TCPTransport listenOptions:` is the list `listen:options:` passes,
+/// so the tests read it directly and also listen for real.
+TestCase subclass: TransportOptionsTest
+  field: path :: String = ""
+
+  setUp =>
+    self.path := File tempDirectory ++ "/catalina_" ++ System uniqueId printString ++ ".sock"
+
+  tearDown => File delete: self.path
+
+  /// Listen with `options`, close the socket, and answer the options
+  /// `gen_tcp:listen/2` was given.
+  listenWith: options :: List -> List =>
+    (TCPTransport listen: 0 options: options) ifOk: [:ls |
+      TCPTransport close: ls
+    ] ifError: [:_e | nil]
+    File delete: self.path
+    TCPTransport listenOptions: options
+
+  hasKey: key :: Symbol in: options :: List -> Boolean =>
+    (Erlang proplists is_defined: key with: options) =:= true
+
+  // ===== transport_options_test.exs, TCP =====
+  testTcpOmitsNodelayDefaultOnlyForUnixDomainSockets =>
+    local := {#local, self.path}
+    ipUnix := self listenWith: #({#ip, local})
+    ifaddrUnix := self listenWith: #({#ifaddr, local})
+    explicitIp := self listenWith: #({#ip, local}, {#nodelay, false})
+    explicitIfaddr := self listenWith: #({#ifaddr, local}, {#nodelay, false})
+    ipOptions := self listenWith: #()
+    self deny: (self hasKey: #nodelay in: ipUnix)
+    self deny: (self hasKey: #nodelay in: ifaddrUnix)
+    self assert: (Erlang proplists get_value: #nodelay with: explicitIp) equals: false
+    self assert: (Erlang proplists get_value: #nodelay with: explicitIfaddr) equals: false
+    self assert: (Erlang proplists get_value: #nodelay with: ipOptions) equals: true
+
+  // ===== resolve_options/1 =====
+  testDefaultsInOrder =>
+    self assert: (TransportOptions resolveOptions: #()) equals: #({#mode, #binary}, {#active, false}, {#nodelay, true}, {#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
+
+  testUserOptionsOverrideDefaults =>
+    resolved := TransportOptions resolveOptions: #({#backlog, 10}, {#nodelay, false})
+    self assert: (Erlang proplists get_value: #backlog with: resolved) equals: 10
+    self assert: (Erlang proplists get_value: #nodelay with: resolved) equals: false
+    self assert: (resolved select: [:o |
+      (TransportOptions keyOf: o) =:= #backlog
+    ]) size equals: 1
+
+  testRequiredOptionsCannotBeOverridden =>
+    resolved := TransportOptions resolveOptions: #({#active, #once}, {#mode, #list})
+    self assert: (Erlang proplists get_value: #active with: resolved) equals: false
+    self assert: (Erlang proplists get_value: #mode with: resolved) equals: #binary
+    self assert: (resolved select: [:o |
+      (TransportOptions keyOf: o) =:= #active
+    ]) size equals: 1
+
+  testBareOptionsAreKeyedByThemselves =>
+    resolved := TransportOptions resolveOptions: #(#inet6, #inet6)
+    self assert: (resolved select: [:o | o =:= #inet6]) size equals: 1
+
+  testInetBackendIsSortedFirst =>
+    options := TCPTransport listenOptions: #({#backlog, 10}, {#inet_backend, #inet})
+    self assert: options first equals: {#inet_backend, #inet}
+
+  testListensOnAUnixDomainSocket =>
+    ls := (TCPTransport listen: 0 options: #({#ip, {#local, self.path}})) unwrap
+    client := ((Erlang gen_tcp)
+      connect: {#local, self.path}
+      with: 0
+      with: #(#binary, {#active, false})) unwrap
+    server := (TCPTransport accept: ls) unwrap
+    (Erlang gen_tcp) send: client with: "hi"
+    self
+      assert: (TCPTransport
+        recv: server
+        length: 0
+        timeout: 1000) unwrap
+      equals: "hi"
+    (Erlang gen_tcp) close: client
+    TCPTransport close: server
+    TCPTransport close: ls

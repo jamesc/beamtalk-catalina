@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// TransportOptions — builds the listen options a transport passes to
+/// `gen_tcp:listen/2` or `ssl:listen/2`, as Thousand Island's
+/// `Transport.resolve_options/1` does.
+///
+/// The result is the required options, then the user's, then the defaults,
+/// keeping only the first option for each key, so required options win over
+/// the user's and the user's win over the defaults. An option's key is its
+/// first element (`{#backlog, 1024}`) or the option itself (`#binary`).
+///
+/// The required `{#active, false}` is load-bearing: accepted sockets inherit
+/// it and stay passive until the handler arms them, so no data overtakes the
+/// handler's ready message (Phase 0 spike 2).
+///
+/// `{#nodelay, true}` is a default only for IP sockets: it is left out when
+/// `ip` or `ifaddr` is a Unix domain address `{#local, path}`, where the
+/// `socket` backend rejects it.
+///
+/// ## Examples
+/// ```beamtalk
+/// TransportOptions resolveOptions: #({#backlog, 10})
+/// // => #({#mode, #binary}, {#active, false}, {#backlog, 10}, {#nodelay, true}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
+/// ```
+sealed Object subclass: TransportOptions
+
+  /// Options Catalina needs and the user cannot override.
+  class sealed requiredOptions -> List => #({#mode, #binary}, {#active, false})
+
+  /// Defaults the user can override.
+  class sealed defaultOptions -> List =>
+    #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
+
+  /// Required, then user, then default options, first one per key wins.
+  class sealed resolveOptions: userOptions :: List -> List =>
+    all := self requiredOptions
+      ++ userOptions
+      ++ (self defaultNodelayOptions: userOptions)
+      ++ self defaultOptions
+    seen := #()
+    resolved := #()
+    all
+      do: [:option |
+        key := self keyOf: option
+        (seen includes: key)
+          ifFalse: [
+            seen := seen add: key
+            resolved := resolved add: option
+          ]
+      ]
+    resolved
+
+  /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
+  class sealed defaultNodelayOptions: userOptions :: List -> List =>
+    ((self isLocal: (Erlang proplists get_value: #ip with: userOptions)) or: [
+      self isLocal: (Erlang proplists get_value: #ifaddr with: userOptions)
+    ]) ifTrue: [#()] ifFalse: [#({#nodelay, true})]
+
+  /// Whether an `ip`/`ifaddr` value is a Unix domain address.
+  class sealed isLocal: address :: Object -> Boolean =>
+    address match: [
+      {#local, _} -> true;
+      _ -> false
+    ]
+
+  /// The key an option is deduplicated by.
+  class sealed keyOf: option :: Object -> Object =>
+    (option isKindOf: Tuple) ifTrue: [option at: 1] ifFalse: [option]

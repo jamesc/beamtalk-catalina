@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ServerConfig — the configuration of one Catalina server, as Thousand
+/// Island's `ThousandIsland.ServerConfig`. The options and their defaults
+/// are Thousand Island's, in camelCase:
+///
+/// | Option | Default | Thousand Island |
+/// |---|---|---|
+/// | `port` | `4000` | `port` |
+/// | `transport` | `TCPTransport` | `transport_module` |
+/// | `transportOptions` | `#()` | `transport_options` |
+/// | `handler` | none, required | `handler_module` |
+/// | `handlerOptions` | `#()` | `handler_options` |
+/// | `genServerOptions` | `#()` | `genserver_options` |
+/// | `supervisorOptions` | `#()` | `supervisor_options` |
+/// | `numAcceptors` | `100` | `num_acceptors` |
+/// | `numListenSockets` | `1` | `num_listen_sockets` |
+/// | `numConnections` | `16384` (or `#infinity`) | `num_connections` |
+/// | `maxConnectionsRetryCount` | `5` | `max_connections_retry_count` |
+/// | `maxConnectionsRetryWait` | `1000` | `max_connections_retry_wait` |
+/// | `readTimeout` | `60000` (or `#infinity`) | `read_timeout` |
+/// | `handshakeTimeout` | `5000` (or `#infinity`) | `handshake_timeout` |
+/// | `shutdownTimeout` | `15000` (or `#infinity`) | `shutdown_timeout` |
+/// | `silentTerminateOnError` | `false` | `silent_terminate_on_error` |
+///
+/// Build one with `fromOptions:`, which validates the options as
+/// `ServerConfig.new/1` does. (`new:` is sealed on `Value`, so the
+/// validating constructor has its own name.)
+///
+/// ## Examples
+/// ```beamtalk
+/// config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
+/// config numAcceptors   // => 100
+/// ```
+sealed typed Value subclass: ServerConfig
+  field: port :: Integer = 4000
+  field: transport :: Object = TCPTransport
+  field: transportOptions :: List = #()
+  field: handler :: Object = nil
+  field: handlerOptions :: Object = #()
+  field: genServerOptions :: List = #()
+  field: supervisorOptions :: List = #()
+  field: numAcceptors :: Integer = 100
+  field: numListenSockets :: Integer = 1
+  field: numConnections :: Object = 16384
+  field: maxConnectionsRetryCount :: Integer = 5
+  field: maxConnectionsRetryWait :: Integer = 1000
+  field: readTimeout :: Object = 60000
+  field: handshakeTimeout :: Object = 5000
+  field: shutdownTimeout :: Object = 15000
+  field: silentTerminateOnError :: Boolean = false
+
+  /// A validated configuration from a Dictionary of options. Raises on an
+  /// unknown option, a missing `handler`, more listen sockets than
+  /// acceptors, or several listen sockets without `reuseport` or
+  /// `reuseport_lb` in `transportOptions`.
+  class fromOptions: options :: Dictionary -> ServerConfig =>
+    // Not `class sealed`: `self new:` in a direct-called class method
+    // raises badarg (BT-4029), so this runs in the class process. It is
+    // pure, so that costs only the hop.
+    self validateKeys: options
+    config := self new: options
+    self validateHandler: config
+    self validateNumSockets: config
+    self validateReuseport: config
+    config
+
+  /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
+  /// unknown option is a typo the user should hear about, as Elixir's
+  /// `struct!/2` reports it. Not `class sealed`, for `self new` (BT-4029).
+  class validateKeys: options :: Dictionary -> Nil =>
+    known := self new fieldNames
+    options keys
+      do: [:key |
+        (known includes: key) ifFalse: [
+          Error signal: "Unknown server option: " ++ key printString
+        ]
+      ]
+    nil
+
+  class sealed validateHandler: config :: ServerConfig -> Nil =>
+    config handler isNil ifTrue: [
+      Error signal: "No handler defined in server configuration"
+    ]
+    nil
+
+  class sealed validateNumSockets: config :: ServerConfig -> Nil =>
+    config numListenSockets > config numAcceptors
+      ifTrue: [
+        Error signal: "numListenSockets ({config numListenSockets}) must be less than or equal to numAcceptors ({config numAcceptors})"
+      ]
+    nil
+
+  class sealed validateReuseport: config :: ServerConfig -> Nil =>
+    opts := config transportOptions
+    reuseport := (Erlang proplists
+      get_value: #reuseport
+      with: opts
+      with: false) =:= true
+    reuseportLb := (Erlang proplists
+      get_value: #reuseport_lb
+      with: opts
+      with: false) =:= true
+    (config numListenSockets <= 1 or: [reuseport or: [reuseportLb]])
+      ifFalse: [
+        Error signal: "reuseport or reuseport_lb must be set in transportOptions when numListenSockets > 1"
+      ]
+    nil

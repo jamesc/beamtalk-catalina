@@ -1,0 +1,257 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of the TCP half of Thousand Island's `socket_test.exs`.
+///
+/// The Elixir tests start a whole server with a small handler. The server
+/// arrives in Phase 2 and `Handler` in Phase 3, so here the test process
+/// plays the handler: it accepts on a raw listen socket, wraps the
+/// connection in a `Socket` and does what the Elixir handler does. The
+/// telemetry cases move to Phase 5, the SSL ones to Phase 4.
+TestCase subclass: SocketTest
+  field: listenSocket = nil
+  field: port :: Integer = 0
+
+  setUp =>
+    self.listenSocket := (TCPTransport listen: 0 options: #()) unwrap
+    self.port := (TCPTransport sockname: self.listenSocket) unwrap at: 2
+
+  tearDown => TCPTransport close: self.listenSocket
+
+  // ===== helpers =====
+  connect => self connectWith: #()
+
+  /// A passive binary client connected to the listener.
+  connectWith: extra :: List -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: self.port
+      with: #(#binary, {#active, false}) ++ extra) unwrap
+
+  /// Accept the next connection and wrap it as a handler would.
+  accept -> Socket => self acceptWith: HandlerConfig new
+
+  acceptWith: config :: HandlerConfig -> Socket =>
+    raw := (TCPTransport accept: self.listenSocket) unwrap
+    Socket
+      wrap: raw
+      peername: (TCPTransport peername: raw) unwrap
+      handlerConfig: config
+      span: nil
+
+  /// The raw reason of a failed FFI `Result` (BT-3954).
+  reasonOf: result :: Result -> Object =>
+    error := result error
+    error reason
+
+  /// This process's `monitored_by` list.
+  monitoredBy -> List =>
+    (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
+
+  // ===== common behaviour using gen_tcp =====
+  testSendsAndReceives =>
+    client := self connect
+    sock := self accept
+    self assert: ((Erlang gen_tcp) send: client with: "HELLO") isOk
+    data := sock recv unwrap
+    sock send: data
+    self assert: ((Erlang gen_tcp) recv: client with: 0) unwrap equals: "HELLO"
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testClosesConnections =>
+    client := self connect
+    sock := self accept
+    self assert: sock close isOk
+    self assert: (self reasonOf: ((Erlang gen_tcp) recv: client with: 0)) equals: #closed
+    (Erlang gen_tcp) close: client
+
+  // ===== behaviour specific to gen_tcp =====
+  testProvidesConnectionInfo =>
+    client := self connect
+    sock := self accept
+    localPort := ((Erlang inet) port: client) unwrap
+    self assert: sock sockname unwrap equals: {{127, 0, 0, 1}, self.port}
+    self assert: sock peername unwrap equals: {{127, 0, 0, 1}, localPort}
+    self assert: sock negotiatedProtocol error equals: #protocol_not_negotiated
+    self assert: sock connectionInformation error equals: #not_secure
+    self assert: sock peercert error equals: #not_secure
+    self deny: sock isSecure
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testSendsFiles =>
+    client := self connect
+    sock := self accept
+    before := self monitoredBy
+    self
+      assert: (sock
+        sendfile: "test/fixtures/sendfile"
+        offset: 0
+        length: 6) unwrap
+      equals: 6
+    self
+      assert: (sock
+        sendfile: "test/fixtures/sendfile"
+        offset: 1
+        length: 3) unwrap
+      equals: 3
+    self assert: ((Erlang gen_tcp) recv: client with: 9) unwrap equals: "ABCDEFBCD"
+    // The file is closed again, so no file process still monitors us.
+    self assert: self monitoredBy equals: before
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testSendsLargeFiles =>
+    // 32 MiB rather than Thousand Island's 256 MiB, to keep the suite quick.
+    size := 32 * 1024 * 1024
+    path := File tempDirectory ++ "/catalina_sendfile_" ++ System uniqueId printString
+    ((Erlang file) write_file: path with: ((Erlang binary) copy: "x" with: size)) unwrap
+    client := self connect
+    sock := self accept
+    handler := SendfileHandler spawn
+    (sock transport controllingProcess: sock socket pid: handler pid) unwrap
+    handler sendfile: sock path: path!
+    received := 0
+    done := false
+    [done]
+      whileFalse: [
+        chunk := (Erlang gen_tcp)
+          recv: client
+          with: 0
+          with: 5000
+        chunk isOk ifTrue: [
+          received := received + chunk value size
+        ] ifFalse: [done := true]
+      ]
+    self assert: received equals: size
+    self assert: handler sent unwrap equals: size
+    self assert: handler closedFile
+    handler stop
+    (Erlang gen_tcp) close: client
+    File delete: path
+
+  testSendfileOfAMissingFileIsAnError =>
+    client := self connect
+    sock := self accept
+    result := sock
+      sendfile: "test/fixtures/no_such_file"
+      offset: 0
+      length: 0
+    self assert: (self reasonOf: result) equals: #enoent
+    sock close
+    (Erlang gen_tcp) close: client
+
+  // ===== Socket API over TCPTransport =====
+  testRecvUsesReadTimeout =>
+    client := self connect
+    sock := self acceptWith: (HandlerConfig new withReadTimeout: 50)
+    self assert: sock readTimeout equals: 50
+    self assert: (self reasonOf: sock recv) equals: #timeout
+    self assert: (self reasonOf: (sock recv: 0 timeout: 10)) equals: #timeout
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testRecvReadsALength =>
+    client := self connect
+    sock := self accept
+    (Erlang gen_tcp) send: client with: "HELLOWORLD"
+    self assert: (sock recv: 5) unwrap equals: "HELLO"
+    self assert: (sock recv: 5) unwrap equals: "WORLD"
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testShutdownWrite =>
+    client := self connect
+    sock := self accept
+    self assert: (sock shutdown: #write) isOk
+    self assert: (self reasonOf: ((Erlang gen_tcp) recv: client with: 0)) equals: #closed
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testAcceptedSocketIsPassive =>
+    client := self connect
+    sock := self accept
+    self assert: (sock getopts: #(#active)) unwrap equals: #({#active, false})
+    self assert: (sock setopts: #({#active, #once})) isOk
+    self assert: (sock getopts: #(#active)) unwrap equals: #({#active, #once})
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testGetstatCountsBytes =>
+    client := self connect
+    sock := self accept
+    sock send: "HELLO"
+    stats := (sock getstat) unwrap
+    self assert: (Erlang proplists get_value: #send_oct with: stats) equals: 5
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testHandshakeAnswersTheSameSocket =>
+    client := self connect
+    sock := self accept
+    shaken := sock handshake unwrap
+    self assert: shaken socket equals: sock socket
+    self assert: shaken equals: sock
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testUpgradeIsUnsupported =>
+    client := self connect
+    sock := self accept
+    self assert: (sock upgrade: TCPTransport options: #()) error equals: #unsupported_upgrade
+    sock close
+    (Erlang gen_tcp) close: client
+
+  testTCPTransportConformsToTransport =>
+    self assert: (TCPTransport conformsTo: #Transport)
+    self assert: (LegacyTransport conformsTo: #Transport)
+
+  // ===== transports which only implement handshake/1 =====
+  testFallsBackToHandshakeIrrespectiveOfHandshakeTimeout =>
+    self deny: (LegacyTransport respondsTo: #handshake:timeout:)
+    client := self connect
+    config := (HandlerConfig new withTransport: LegacyTransport) withHandshakeTimeout: 250
+    sock := (self acceptWith: config) handshake unwrap
+    self assert: (sock socket at: 1) equals: #legacy
+    // Unwrap the tag and echo through the legacy transport.
+    sock := sock withSocket: (sock socket at: 2)
+    (Erlang gen_tcp) send: client with: "HELLO"
+    sock send: sock recv unwrap
+    self assert: ((Erlang gen_tcp) recv: client with: 0) unwrap equals: "HELLO"
+    sock close
+    (Erlang gen_tcp) close: client
+
+  // ===== peername =====
+  testPeernameIsStillAvailableOnceTheClientHasAborted =>
+    // linger {true, 0} makes close send an RST rather than a FIN.
+    client := self connectWith: #({#linger, {true, 0}})
+    clientPort := ((Erlang inet) port: client) unwrap
+    sock := self accept
+    (Erlang gen_tcp) close: client
+    live := TCPTransport peername: sock socket
+    retries := 200
+    [live isOk and: [retries > 0]]
+      whileTrue: [
+        Timer sleep: 5
+        retries := retries - 1
+        live := TCPTransport peername: sock socket
+      ]
+    self assert: live isError
+    self assert: (sock peername unwrap at: 2) equals: clientPort
+    sock close
+
+  testPeernameIsTheValueTheSocketWasCreatedWith =>
+    config := HandlerConfig
+      handler: nil
+      transport: TCPTransport
+      readTimeout: 1000
+      handshakeTimeout: 1000
+      silentTerminateOnError: false
+    // The raw socket is never touched, so it can be anything.
+    sock := Socket
+      wrap: #unused
+      peername: {{1, 2, 3, 4}, 5}
+      handlerConfig: config
+      span: nil
+    self assert: sock peername unwrap equals: {{1, 2, 3, 4}, 5}
