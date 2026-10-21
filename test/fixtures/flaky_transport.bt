@@ -4,37 +4,55 @@
 /// `FlakyTransport` from `acceptor_test.exs`: TCP, except that a test can
 /// queue errors for `accept:` and `controllingProcess:pid:` to answer
 /// before real calls resume. The queues are persistent terms, since the
-/// acceptor calling the transport is not the test process.
+/// acceptor calling the transport is not the test process, and they are
+/// kept per server port: test classes run in parallel, and a queue shared
+/// by every server let one test's errors reach another's server (or its
+/// `setUp` clear them).
 sealed typed Object subclass: FlakyTransport
 
-  /// Errors the next `accept:` calls answer, in order.
-  class sealed acceptResults: reasons :: List -> Nil =>
-    Erlang persistent_term put: #catalinaFlakyAccept with: reasons
+  /// Errors the next `accept:` calls on the server listening on `port`
+  /// answer, in order.
+  class sealed acceptResults: reasons :: List port: port :: Integer -> Nil =>
+    Erlang persistent_term put: {#catalinaFlakyAccept, port} with: reasons
     nil
 
-  /// Errors the next `controllingProcess:pid:` calls answer, in order.
-  class sealed controllingProcessResults: reasons :: List -> Nil =>
-    Erlang persistent_term put: #catalinaFlakyControllingProcess with: reasons
+  /// Errors the next `controllingProcess:pid:` calls for connections to
+  /// `port` answer, in order.
+  class sealed controllingProcessResults: reasons :: List port: port :: Integer -> Nil =>
+    Erlang persistent_term put: {#catalinaFlakyControllingProcess, port} with: reasons
     nil
+
+  /// A port that is free now, so a test can queue errors for a server
+  /// before starting it there.
+  class sealed freePort -> Integer =>
+    listening := ((Erlang gen_tcp) listen: 0 with: #(#binary)) unwrap
+    port :: Integer := ((Erlang inet) port: listening) unwrap
+    (Erlang gen_tcp) close: listening
+    port
 
   /// Take the next queued error under `key`, or nil.
-  class sealed next: key :: Symbol -> Object =>
+  class sealed next: key :: Tuple -> Object =>
     queue := Erlang persistent_term get: key with: #()
     queue isEmpty ifTrue: [^nil]
     Erlang persistent_term put: key with: queue rest
     queue first
 
+  /// The local port of a listen or connected socket.
+  class sealed portOf: socket :: Object -> Integer =>
+    {_ip, port} := ((Erlang inet) sockname: socket) unwrap
+    port
+
   class sealed listen: port :: Integer options: _options :: List -> Result =>
     (Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true})
 
   class sealed accept: listenSocket :: Object -> Result =>
-    injected := self next: #catalinaFlakyAccept
+    injected := self next: {#catalinaFlakyAccept, self portOf: listenSocket}
     injected isNil ifTrue: [
       (Erlang gen_tcp) accept: listenSocket
     ] ifFalse: [Result error: injected]
 
   class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
-    injected := self next: #catalinaFlakyControllingProcess
+    injected := self next: {#catalinaFlakyControllingProcess, self portOf: socket}
     injected isNil ifTrue: [
       (Erlang gen_tcp) controlling_process: socket with: pid
     ] ifFalse: [Result error: injected]

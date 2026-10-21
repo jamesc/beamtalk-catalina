@@ -13,8 +13,6 @@ TestCase subclass: TelemetryTest
 
   setUp =>
     Ets new: self tableName type: #set
-    FlakyTransport acceptResults: #()
-    FlakyTransport controllingProcessResults: #()
     self
 
   tearDown =>
@@ -122,15 +120,23 @@ TestCase subclass: TelemetryTest
 
   // ===== acceptor_test.exs =====
   testEmfileEvent =>
-    FlakyTransport acceptResults: #(#emfile)
-    self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    port := FlakyTransport freePort
+    FlakyTransport acceptResults: #(#emfile) port: port
+    self start: TelemetryEcho options: #{
+      #transport => FlakyTransport,
+      #port => port
+    }
     event := self await: #acceptor named: #emfile
     self assert: ((self measurementsOf: event) at: #error) equals: #emfile
     self assert: (self isReference: ((self metadataOf: event) at: #telemetry_span_context))
 
   testAcceptErrorEvent =>
-    FlakyTransport acceptResults: #(#ehostunreach)
-    self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    port := FlakyTransport freePort
+    FlakyTransport acceptResults: #(#ehostunreach) port: port
+    self start: TelemetryEcho options: #{
+      #transport => FlakyTransport,
+      #port => port
+    }
     event := self await: #acceptor named: #accept_error
     self assert: ((self measurementsOf: event) at: #error) equals: #ehostunreach
 
@@ -143,8 +149,12 @@ TestCase subclass: TelemetryTest
     self deny: ((self measurementsOf: event) at: #error) isNil
 
   testOwnershipTransferFailureIsASpawnError =>
-    FlakyTransport controllingProcessResults: #(#badarg)
-    port := self start: TelemetryEcho options: #{#transport => FlakyTransport}
+    queued := FlakyTransport freePort
+    FlakyTransport controllingProcessResults: #(#badarg) port: queued
+    port := self start: TelemetryEcho options: #{
+      #transport => FlakyTransport,
+      #port => queued
+    }
     self connect: port
     event := self await: #acceptor named: #spawn_error
     self assert: ((self measurementsOf: event) at: #error) equals: {#controlling_process, #badarg}
