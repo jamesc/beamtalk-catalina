@@ -5,8 +5,7 @@
 /// from their callbacks and the tests capture the log; the fixtures here
 /// (`RecordingHandler` subclasses) append to a log in an Ets table instead,
 /// including the exit reason, which stands in for the presence or absence of
-/// a crash report. Telemetry cases are ported in Phase 5, the SSL upgrade
-/// cases in Phase 4.
+/// a crash report. Telemetry cases are ported in Phase 5.
 TestCase subclass: HandlerTest
 
   tableName -> Symbol => #catalinaHandlerTest
@@ -16,28 +15,20 @@ TestCase subclass: HandlerTest
     self
 
   tearDown =>
-    table := Ets named: self tableName
-    (table at: #servers ifAbsent: [
-      #()
-    ]) do: [:srv | srv isAlive ifTrue: [srv stop]]
-    table delete
+    HandlerHarness stopAll: self tableName
+    (Ets named: self tableName) delete
 
   /// Start a one-acceptor server for `handler` and answer its port.
   start: handler -> Integer => self start: handler options: #{}
 
   start: handler options: options :: Dictionary -> Integer =>
-    all := ((options at: #port put: 0) at: #handler put: handler) at: #numAcceptors put: 1
-    all := all at: #handlerOptions put: ((all at: #handlerOptions ifAbsent: [
-      #{}
-    ]) at: #table put: self tableName)
-    srv := (Catalina start: all) unwrap
-    // Kept for tearDown: a TestCase is a Value, so a helper cannot set a field.
-    table := Ets named: self tableName
-    table at: #servers put: ((table at: #servers ifAbsent: [#()]) add: srv)
-    srv listenerInfo unwrap at: 2
+    HandlerHarness
+      start: handler
+      options: options
+      table: self tableName
 
   /// The server the test started last.
-  server => ((Ets named: self tableName) at: #servers) last
+  server => HandlerHarness serverIn: self tableName
 
   connect: port :: Integer -> Object =>
     ((Erlang gen_tcp)
@@ -60,28 +51,18 @@ TestCase subclass: HandlerTest
   // Generous, as the machine may be loaded; it only waits when nothing comes.
   recv: client :: Object -> Object => self recv: client within: 3000
 
-  log -> List => (Ets named: self tableName) at: #log ifAbsent: [#()]
+  log -> List => HandlerHarness logIn: self tableName
 
   /// Wait up to three seconds for `event` to be logged.
   awaitLogged: event -> Boolean =>
-    300 timesRepeat: [(self log includes: event) ifFalse: [Timer sleep: 10]]
-    self log includes: event
+    HandlerHarness await: event in: self tableName
 
   /// The logged exit reason, waiting up to three seconds for it.
   exitReason -> Object =>
-    300 timesRepeat: [(self exitEntry) isNil ifTrue: [Timer sleep: 10]]
-    entry := self exitEntry
+    entry := HandlerHarness entry: #exit in: self tableName
     entry isNil ifTrue: [nil] ifFalse: [entry at: 2]
 
-  handlerEntry =>
-    self log detect: [:e |
-      (e isKindOf: Tuple) and: [(e at: 1) =:= #handler]
-    ] ifNone: [nil]
-
-  exitEntry =>
-    self log detect: [:e |
-      (e isKindOf: Tuple) and: [(e at: 1) =:= #exit]
-    ] ifNone: [nil]
+  handlerEntry => HandlerHarness entry: #handler in: self tableName
 
   // ===== state passing =====
   testTakesHandlerOptionsAsInitialStateAndPreservesIt =>
@@ -181,6 +162,23 @@ TestCase subclass: HandlerTest
     self assert: (self recv: client) equals: "HELLO"
     self assert: (self awaitLogged: {#error, #unsupported_upgrade})
     self assert: (self recv: client) equals: #closed
+
+  testUpgradesTheTransportMidConnection =>
+    port := self start: UpgradingEcho
+    client := self connect: port
+    self assert: (self recv: client) equals: "HELLO"
+    tls := (HandlerHarness startTLS: client) unwrap
+    SSLTransport send: tls data: "Test me"
+    self assert: (HandlerHarness tlsRecv: tls within: 3000) equals: "Test me"
+
+  testRunsTheContinuationAfterAnUpgrade =>
+    port := self start: UpgradingEchoThen
+    client := self connect: port
+    self assert: (self recv: client) equals: "HELLO"
+    tls := (HandlerHarness startTLS: client) unwrap
+    SSLTransport send: tls data: "Test me"
+    self assert: (HandlerHarness tlsRecv: tls within: 3000) equals: "Test me"
+    self assert: (self awaitLogged: #continued)
 
   // ===== handle_data =====
   testDataKeepsConnectionOpenOnContinue =>

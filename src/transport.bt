@@ -5,7 +5,7 @@
 /// Thousand Island's `ThousandIsland.Transport` behaviour.
 ///
 /// A transport is a class with class-side methods only (`TCPTransport`,
-/// later `SSLTransport`), so every requirement here is a `class` method.
+/// `SSLTransport`), so every requirement here is a `class` method.
 /// Conformance is structural: a class conforms when it answers all of them.
 ///
 /// Expected failures answer `Result error:` holding the **bare Erlang

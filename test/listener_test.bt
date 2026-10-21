@@ -56,7 +56,7 @@ TestCase subclass: ListenerTest
     ls := ((Erlang gen_tcp) listen: port with: #()) unwrap
     (Erlang gen_tcp) close: ls
     listener := Listener startFor: (self configFor: port)
-    self assert: (((Erlang gen_tcp) listen: port with: #()) error reason) equals: #eaddrinuse
+    self assert: (TransportResult bare: ((Erlang gen_tcp) listen: port with: #())) error equals: #eaddrinuse
     listener stop
 
   testClosesItsSocketsWhenItStops =>

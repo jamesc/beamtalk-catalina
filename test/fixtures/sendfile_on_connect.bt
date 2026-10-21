@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Sendfile` from `socket_test.exs`: sends parts of the fixture file.
+RecordingHandler subclass: SendfileOnConnect
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    self
+      note: {#sent, sock
+        sendfile: "test/fixtures/sendfile"
+        offset: 0
+        length: 6}
+    self
+      note: {#sent, sock
+        sendfile: "test/fixtures/sendfile"
+        offset: 1
+        length: 3}
+    HandlerResult close: st

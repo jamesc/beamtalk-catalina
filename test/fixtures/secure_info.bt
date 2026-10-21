@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Info` from `socket_test.exs`: logs what the socket reports about the
+/// connection, then closes it.
+RecordingHandler subclass: SecureInfo
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    self note: {#sockname, sock sockname}
+    self note: {#peername, sock peername}
+    self note: {#negotiatedProtocol, sock negotiatedProtocol}
+    self note: {#connectionInformation, sock connectionInformation isOk}
+    self note: {#isSecure, sock isSecure}
+    sock send: "done"
+    HandlerResult close: st

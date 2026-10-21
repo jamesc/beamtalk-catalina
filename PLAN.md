@@ -108,7 +108,7 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 | `socket.ex` | 273 | `src/socket.bt` (Phase 1) | Beamtalk |
 | `transport.ex` | 271 | `src/transport.bt` (Protocol) + `src/transport_options.bt` (`resolveOptions:`) (Phase 1) | Beamtalk |
 | `transports/tcp.ex` | 158 | `src/transports/tcptransport.bt` (Phase 1; the file name must match `TCPTransport`) | Beamtalk (FFI to `gen_tcp`/`inet`) |
-| `transports/ssl.ex` | 211 | `src/transports/ssltransport.bt` | Beamtalk (FFI to `ssl`) |
+| `transports/ssl.ex` | 211 | `src/transports/ssltransport.bt` (Phase 4) | Beamtalk (FFI to `ssl`) |
 | `telemetry.ex` | 509 | `src/catalina_telemetry.bt` — spans + events (not `Telemetry`, which is the stdlib facade's name, BT-4025) | Beamtalk (stdlib `Telemetry`, BT-4025) |
 | `logger.ex` | 151 | `src/logger.bt` (minimal) | Beamtalk, Phase 6 |
 | `process_label.ex` | 52 | one call to `proc_lib:set_label/1` in Handler | Beamtalk |
@@ -664,7 +664,65 @@ The plan as written:
   delegating handler, so make sure user `Server` sync/async methods coexist
   with Catalina's own clauses.
 
-### Phase 4: SSL (`socket_test` SSL half, SSL cases in `server_test`)
+### Phase 4: SSL (`socket_test` SSL half, SSL cases in `server_test`) — done (BT-4045)
+
+117 tests in all, 15 of them new.
+
+`SecureSocketTest` (13) covers:
+- the SSL half of `socket_test.exs`: send and receive, close, connection
+  info with ALPN, `sendfile` (small and large), a stalled handshake closed
+  after `handshakeTimeout`, and a handshake within it;
+- the SSL cases of `server_test.exs`: a default option overridden, a
+  required one not overridable, bare Erlang options (`inet6`), a missing
+  certificate failing the start, and a client offering only unsupported
+  ciphers (`handleError:` gets `{tls_alert, {insufficient_security, _}}`);
+- a Catalina addition: a start without a key or certificate is an error.
+
+`HandlerTest` gains the 2 SSL-upgrade tests deferred from Phase 3.
+
+Not ported here, all to Phase 5:
+- the telemetry assertions;
+- `socket_test.exs`'s "exactly one connection stop event when the
+  handshake fails", which is telemetry only;
+- the start/ready event ordering in the two handshake-timeout tests.
+
+`server_test.exs`'s pre-OTP-28.1 certificate case is not ported, because
+CI runs OTP 28.5.
+
+Deviations:
+
+- **Test certificates are new.** Thousand Island's test CA expires in
+  January 2027, so `test/fixtures/{ca,cert,key}.pem` is a fresh CA ("Catalina
+  Test CA") and a server certificate for `localhost` and 127.0.0.1, both
+  valid until 2126. The CA key is not kept. To regenerate them:
+
+  ```sh
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout ca-key.pem -out ca.pem -days 36500 \
+    -subj "/CN=Catalina Test CA" -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
+  openssl req -newkey rsa:2048 -nodes -keyout key.pem -out cert.csr -subj "/CN=localhost"
+  printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n" > ext.cnf
+  openssl x509 -req -in cert.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 36500 -extfile ext.cnf
+  ```
+- `TransportResult bare:` (new, `src/transport_result.bt`) is the one place
+  FFI errors become bare reasons, shared by both transports (it was
+  `TCPTransport bare:`).
+- `SSLTransport` starts the `ssl` application itself (`listen:options:`,
+  `upgrade:options:`), where an Elixir release would list it in
+  `extra_applications`. `ssl:handshake` can answer `{ok, Socket, Ext}`, a
+  3-tuple the FFI boundary does not convert, so `SSLTransport handshaken:`
+  normalises it.
+- `Listener sockets` is now `late state: sockets :: List(Port | Tuple)`
+  (a TCP listen socket is a Port, a TLS one an `sslsocket` record). The
+  sockets are opened into a local list and assigned once; on failure they
+  are closed inline, because a List of ports cannot be passed in a message,
+  even to `self` (the sendability check).
+- Test plumbing shared by `HandlerTest` and `SecureSocketTest` moved into
+  `test/fixtures/handler_harness.bt`.
+- `ReadOpt` logs the option it read rather than sending its `inspect`.
+- The large-file TLS `sendfile` is 4 MiB (four chunks), not 256 MiB.
+
+The plan as written:
 
 - `SSLTransport`: `listen` validates a key option and a cert option, calls
   `ssl:listen`; `accept` = `ssl:transport_accept`; `handshake:timeout:` =

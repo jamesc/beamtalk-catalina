@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `LargeSendfile` from `socket_test.exs`: sends the whole file named by
+/// `handlerOptions at: #path`.
+RecordingHandler subclass: LargeSendfile
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    options :: Dictionary := self handlerOptions
+    path :: String := options at: #path
+    self
+      note: {#sent, sock
+        sendfile: path
+        offset: 0
+        length: 0}
+    HandlerResult close: st
