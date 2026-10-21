@@ -67,11 +67,17 @@
 ///     HandlerResult continue: st
 /// ```
 typed Server subclass: Handler
-  state: handlerOptions :: Object = nil
+  // The server's `handlerOptions`, from the start args. `late`: given once
+  // at spawn and fixed for the connection's life. `Object`, since any term
+  // (nil included) is a valid option value.
+  late state: handlerOptions :: Object
   // Set by the ready message. Reads reachable from `handleInfo:` and
   // `terminate:` are guarded with `hasField:`.
   late state: socket :: Socket
+  // The callbacks' state: user data, where nil is a legitimate value.
   state: userState :: Object = nil
+  // The timer slots stay nilable: a timer is cancelled and re-armed, so a
+  // stale value would be wrong.
   state: readTimer :: Reference | Nil = nil
   // The ref the running timer's message carries; a message with any other
   // ref is stale.

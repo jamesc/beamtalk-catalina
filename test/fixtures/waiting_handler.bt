@@ -5,8 +5,8 @@
 /// ready message and its exit reason in the Ets table named by
 /// `handlerOptions`. It overrides `terminate:`, so it traps exits.
 typed Server subclass: WaitingHandler
-  // The name of the Ets table to record in.
-  state: handlerOptions :: Symbol | Nil = nil
+  // The name of the Ets table to record in (the start args).
+  state: handlerOptions :: Symbol
 
   initialize -> Nil => self record: #started value: self pid
 
@@ -19,5 +19,4 @@ typed Server subclass: WaitingHandler
   terminate: reason :: Object -> Nil => self record: #terminated value: reason
 
   record: key :: Symbol value: value :: Object -> Nil =>
-    table :: Symbol := self.handlerOptions
-    (Ets named: table) at: key put: value
+    (Ets named: self.handlerOptions) at: key put: value
