@@ -1,0 +1,157 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The surface Bandit reads from Thousand Island, and so Buccaneer from
+/// Catalina (PLAN.md § Phase 7), exercised the way Bandit uses it:
+///
+/// - `HandlerResult` `continue:`, `continue:persistentTimeout:`, `close:`,
+///   `error:state:`;
+/// - the `{socket, userState}` state shape (`socket`, `userState`);
+/// - the `Socket` calls Bandit's `SocketHelpers` and handlers make;
+/// - `Socket readTimeout`; `Socket telemetrySpan` (its contents are
+///   checked after Phase 5);
+/// - the option names (`ServerConfig optionNames`);
+/// - `listenerInfo` (`ThousandIsland.listener_info/1`);
+/// - a delegating handler that switches protocols and forwards sync calls,
+///   casts and raw messages, as `Bandit.DelegatingHandler`. (A linked
+///   process's abnormal `EXIT` cannot be handled yet: BT-4052.)
+TestCase subclass: SurfaceTest
+
+  tableName -> Symbol => #catalinaSurfaceTest
+
+  setUp =>
+    Ets new: self tableName type: #set
+    self
+
+  tearDown =>
+    HandlerHarness stopAll: self tableName
+    (Ets named: self tableName) delete
+
+  start: handler options: options :: Dictionary -> Integer =>
+    HandlerHarness
+      start: handler
+      options: options
+      table: self tableName
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  send: data :: String to: client :: Object -> Object =>
+    (Erlang gen_tcp) send: client with: data
+
+  recv: client :: Object -> Object =>
+    result := TCPTransport
+      recv: client
+      length: 0
+      timeout: 3000
+    result isOk ifTrue: [result value] ifFalse: [result error]
+
+  /// The DelegatingHandler serving the connection.
+  handler -> DelegatingHandler =>
+    entry := HandlerHarness entry: #handler in: self tableName
+    found :: DelegatingHandler := entry at: 2
+    found
+
+  // ===== HandlerResult =====
+  testHandlerResultConstructors =>
+    self assert: (HandlerResult continue: 1) kind equals: #continue
+    persistent := HandlerResult continue: 1 persistentTimeout: 500
+    self assert: persistent timeout equals: 500
+    self assert: persistent persistent
+    self assert: (HandlerResult close: 1) kind equals: #close
+    failed := HandlerResult error: #nope state: 1
+    self assert: failed kind equals: #error
+    self assert: failed reason equals: #nope
+    self assert: failed state equals: 1
+
+  // ===== options =====
+  testOptionNamesMatchServerConfig =>
+    names := ServerConfig optionNames asSet
+    self assert: names size equals: 16
+    #(#port, #transport, #transportOptions, #handler, #handlerOptions, #genServerOptions, #supervisorOptions, #numAcceptors, #numListenSockets, #numConnections, #maxConnectionsRetryCount, #maxConnectionsRetryWait, #readTimeout, #handshakeTimeout, #shutdownTimeout, #silentTerminateOnError) do: [:name |
+      self assert: (names includes: name)
+    ]
+
+  // ===== the delegating handler =====
+  testDelegatesSwitchesProtocolsAndKeepsState =>
+    port := self start: DelegatingHandler options: #{
+      #readTimeout => 4321,
+      #handlerOptions => #{#delegate => UpperProtocol}
+    }
+    client := self connect: port
+    self send: "hello" to: client
+    self assert: (self recv: client) equals: "HELLO"
+    handler := self handler
+    // The {socket, userState} shape.
+    self assert: handler socket readTimeout equals: 4321
+    state :: Dictionary := handler userState
+    self assert: (state at: #delegate) equals: UpperProtocol
+    self send: "switch" to: client
+    self assert: (self recv: client) equals: "switched"
+    switched :: Dictionary := handler userState
+    self assert: (switched at: #delegate) equals: EchoProtocol
+    self send: "hello" to: client
+    self assert: (self recv: client) equals: "hello"
+    // `continue:persistentTimeout:` changed the socket's read timeout.
+    self assert: handler socket readTimeout equals: 30000
+
+  testForwardsSyncCallsCastsAndRawMessages =>
+    port := self start: DelegatingHandler options: #{
+      #handlerOptions => #{#delegate => UpperProtocol}
+    }
+    client := self connect: port
+    self send: "x" to: client
+    self assert: (self recv: client) equals: "X"
+    handler := self handler
+    // A sync call the handler does not define goes to the delegate.
+    self assert: (handler perform: #describe withArguments: #()) equals: "upper"
+    // A sync call by name, and a cast: both reach `doesNotUnderstand:args:`.
+    self assert: handler describe equals: "upper"
+    handler describe!
+    Erlang erlang send: handler pid msg: {#plug_conn, #sent}
+    self assert: (HandlerHarness await: {#info, {#plug_conn, #sent}} in: self tableName)
+    // A linked process's normal exit is absorbed, as Bandit's HTTP/1
+    // handler ignores `{:EXIT, _, :normal}`. Seeing abnormal ones in
+    // `handleUserInfo:` (Bandit's HTTP/2 streams) needs BT-4052.
+    handler startLinkedWorker
+    Timer sleep: 50
+    self assert: handler isAlive
+    // The connection still works.
+    self send: "y" to: client
+    self assert: (self recv: client) equals: "Y"
+
+  // ===== Socket, as Bandit's SocketHelpers reads it =====
+  testSocketCallsBanditMakes =>
+    port := self start: SecureInfo options: #{}
+    client := self connect: port
+    self assert: (self recv: client) equals: "done"
+    self assert: (self logged: #isSecure) equals: false
+    peer :: Result := self logged: #peername
+    self assert: (peer unwrap at: 1) equals: {127, 0, 0, 1}
+    local :: Result := self logged: #sockname
+    self assert: (local unwrap at: 2) equals: port
+    self assert: (self logged: #negotiatedProtocol) equals: (Result error: #protocol_not_negotiated)
+    self assert: (self logged: #connectionInformation) equals: false
+
+  logged: tag :: Symbol -> Object =>
+    entry := HandlerHarness entry: tag in: self tableName
+    entry isNil ifTrue: [nil] ifFalse: [entry at: 2]
+
+  // ===== listenerInfo =====
+  testListenerInfo =>
+    port := self start: EchoHandler options: #{}
+    info := (HandlerHarness serverIn: self tableName) listenerInfo unwrap
+    self assert: info equals: {{0, 0, 0, 0}, port}
+
+  // ===== telemetry span (contents verified after Phase 5) =====
+  testSocketCarriesItsTelemetrySpan =>
+    sock := Socket
+      wrap: #unused
+      peername: {{1, 2, 3, 4}, 5}
+      handlerConfig: HandlerConfig new
+      span: #span
+    self assert: sock telemetrySpan equals: #span

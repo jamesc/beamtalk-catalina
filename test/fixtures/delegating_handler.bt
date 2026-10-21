@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Bandit's `DelegatingHandler`, the shape Buccaneer needs: the callbacks go
+/// to the protocol class in `userState at: #delegate`, which a callback can
+/// change to switch protocols mid-connection. Messages the handler does not
+/// understand, sync calls and casts alike, are forwarded to the delegate
+/// (Bandit's `handle_call`/`handle_cast` forwarding), and raw messages
+/// reach `handleUserInfo:` (`handle_info`). A linked process's `EXIT` does
+/// not: a normal one is absorbed and an abnormal one stops the handler
+/// (BT-4052).
+RecordingHandler subclass: DelegatingHandler
+
+  /// The current protocol class.
+  protocol -> Dynamic =>
+    options :: Dictionary := self userState
+    options at: #delegate
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    self note: {#handler, self}
+    self protocol handleConnection: sock state: st
+
+  handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+    self protocol
+      handleData: data
+      socket: sock
+      state: st
+
+  handleUserInfo: msg :: Object -> Object => self note: {#info, msg}
+
+  /// Start a linked process that exits normally at once.
+  startLinkedWorker -> Pid => Erlang erlang spawn_link: [nil]
+
+  // Forwarding is type-erased by design (as `TimeoutProxy`'s): the selector
+  // is only known at run time.
+  @expect type
+  doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
+    self protocol perform: selector withArguments: arguments asList

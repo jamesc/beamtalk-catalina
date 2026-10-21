@@ -825,7 +825,41 @@ The plan as written:
 - README (Installation / Usage / Classes / Development, as in beamtalk-http),
   AGENTS.md updated with the Thousand Island cross-reference, `///` docs with examples on every public class.
 
-### Phase 7: Buccaneer alignment
+### Phase 7: Buccaneer alignment — done (BT-4050), telemetry items after Phase 5
+
+Buccaneer is still a scaffold, so the reference was Bandit 1.13.1's use of
+Thousand Island. `SurfaceTest` (7 tests, 141 in all) covers it:
+- `HandlerResult` `continue:`, `continue:persistentTimeout:`, `close:`,
+  `error:state:`;
+- the `socket`/`userState` state shape, and `Socket readTimeout`,
+  including a persistent timeout changing it;
+- the `Socket` calls Bandit's `SocketHelpers` makes;
+- `ServerConfig optionNames` (new: Bandit splits its options with
+  `ServerConfig.__struct__()`);
+- `listenerInfo`;
+- a `DelegatingHandler` fixture shaped like Bandit's. It switches protocol
+  classes through its state, forwards unknown sync calls and casts with
+  `doesNotUnderstand:args:`, and gets raw messages in `handleUserInfo:`.
+
+README.md § Public API lists the stable surface, and AGENTS.md points at
+it.
+
+- **Verified after Phase 5:** `Socket telemetrySpan` and its span context.
+  Today it carries whatever span the acceptor passed (nil until Phase 5),
+  and the test checks only that.
+- **Gap (BT-4052):** Bandit's HTTP/2 handler handles a linked stream
+  process's `{:EXIT, pid, reason}` in `handle_info` and resets that stream.
+  A Beamtalk trapping `Server` cannot: a non-parent abnormal `EXIT` always
+  stops it, and a normal one is absorbed. HTTP/1 only ignores the normal
+  case, which works.
+- **Delegation:** Beamtalk has no `handle_call`/`handle_cast` hooks; a
+  handler's methods are its calls and casts. Forwarding unknown ones is
+  `doesNotUnderstand:args:` (`@expect type`, as the stdlib's
+  `TimeoutProxy`).
+- **No `v0.1.0` tag** until the release-readiness gate (BT-4051) and the
+  user's go-ahead.
+
+The plan as written:
 
 Confirm the surface Bandit reads is present and stable before Buccaneer starts:
 `HandlerResult` constructors (`continue:`, `continue:persistentTimeout:`,
