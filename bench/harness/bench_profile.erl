@@ -8,7 +8,7 @@
 %% own code, the language runtime, and OTP.
 %%
 %%   bench/run.sh bench_profile [--impl catalina|ti] [--row ROW]
-%%       [--seconds N] [--top N] [--type call_time|call_count]
+%%       [--seconds N] [--top N] [--type call_time|call_count|call_memory]
 -module(bench_profile).
 
 -export([main/0, profile/3]).
@@ -59,7 +59,7 @@ parse([X | _], _) -> error({unknown_argument, X}).
 %% those call `M:module_info(functions)`, which Beamtalk-compiled modules
 %% do not export, and crash.
 profile(Type, Ms, Top) ->
-    Flag = case Type of call_time -> call_time; call_count -> call_count end,
+    Flag = Type,
     erlang:trace_pattern({'_', '_', '_'}, true, [local, Flag]),
     erlang:trace(all, true, [call]),
     timer:sleep(Ms),
@@ -72,7 +72,7 @@ profile(Type, Ms, Top) ->
     ByMod = lists:reverse(lists:keysort(2, maps:to_list(lists:foldl(fun({V, {M, _, _}, _}, Acc) ->
         maps:update_with(M, fun(X) -> X + V end, V, Acc)
     end, #{}, Rows)))),
-    Unit = case Type of call_time -> "us"; call_count -> "calls" end,
+    Unit = case Type of call_time -> "us"; call_count -> "calls"; call_memory -> "words" end,
     [io_lib:format("total ~p ~s over ~p ms~n~nTop functions (own time):~n", [Total, Unit, Ms]),
      [io_lib:format("~6.2f%  ~12w ~s ~10w calls  ~p~n",
                     [pct(V, Total), V, Unit, C, MFA]) || {V, MFA, C} <- lists:sublist(ByFun, Top)],
@@ -89,6 +89,12 @@ read(M, F, A, call_time) ->
     case erlang:trace_info({M, F, A}, call_time) of
         {call_time, L} when is_list(L) ->
             lists:foldl(fun({_Pid, C, S, Us}, {V, N}) -> {V + S * 1000000 + Us, N + C} end, {0, 0}, L);
+        _ -> {0, 0}
+    end;
+read(M, F, A, call_memory) ->
+    case erlang:trace_info({M, F, A}, call_memory) of
+        {call_memory, L} when is_list(L) ->
+            lists:foldl(fun({_Pid, C, W}, {V, N}) -> {V + W, N + C} end, {0, 0}, L);
         _ -> {0, 0}
     end;
 read(M, F, A, call_count) ->

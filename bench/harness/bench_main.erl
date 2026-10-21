@@ -11,7 +11,15 @@
 %%
 %%   erl -noshell -pa _build/bench/ebin -s bench_main main -extra \
 %%       [--rounds 5] [--duration 5000] [--warmup 1000] [--rows full|smoke]
-%%       [--only ROWID,...] [--out DIR]
+%%       [--only ROWID,...] [--out DIR] [--max-load L] [--ab-trace-store]
+%%
+%% With `--ab-trace-store`, a third peer runs Catalina with the Beamtalk
+%% trace store's telemetry handlers detached (`catalina_notrace`), measured
+%% in the same rounds, and the report adds what the trace store costs.
+%%
+%% With `--max-load L`, each round waits (up to 30 minutes) until the
+%% 1-minute load average is below L, so a shared machine is measured when
+%% it is quiet; the report records the load at every round.
 -module(bench_main).
 
 -export([main/0, rows/1]).
@@ -19,7 +27,8 @@
 main() ->
     Opts = parse(init:get_plain_arguments(), #{
         rounds => 5, duration => 5000, warmup => 1000, rows => full,
-        only => [], out => filename:join([os:getenv("BENCH_ROOT"), "_build", "bench"])
+        only => [], max_load => undefined, ab_trace_store => false,
+        out => filename:join([os:getenv("BENCH_ROOT"), "_build", "bench"])
     }),
     try run(Opts) of
         ok -> halt(0)
@@ -35,8 +44,13 @@ parse(["--warmup", N | T], O) -> parse(T, O#{warmup => list_to_integer(N)});
 parse(["--rows", R | T], O) -> parse(T, O#{rows => list_to_atom(R)});
 parse(["--only", R | T], O) -> parse(T, O#{only => string:split(R, ",", all)});
 parse(["--out", D | T], O) -> parse(T, O#{out => D});
+parse(["--max-load", L | T], O) -> parse(T, O#{max_load => list_to_number(L)});
+parse(["--ab-trace-store" | T], O) -> parse(T, O#{ab_trace_store => true});
 parse([], O) -> O;
 parse([X | _], _) -> error({unknown_argument, X}).
+
+list_to_number(S) ->
+    try list_to_integer(S) catch error:badarg -> list_to_float(S) end.
 
 %% === Rows ===
 
@@ -45,6 +59,8 @@ rows(full) ->
     [{echo_id(C, S), echo, #{conns => C, size => S}}
         || S <- [64, 65536], C <- [1, 10, 100, 1000]]
     ++ [{"accept_tcp", churn, #{workers => 32}},
+        %% Churn at the highest rate the clients can drive.
+        {"accept_tcp_w128", churn, #{workers => 128}},
         {"tls_handshake", churn, #{workers => 32, tls => true}},
         {"tls_echo_c100_64B", echo, #{conns => 100, size => 64, tls => true}},
         {"tls_echo_c100_64KiB", echo, #{conns => 100, size => 65536, tls => true}},
@@ -74,24 +90,36 @@ run(Opts = #{rounds := Rounds, out := Out}) ->
     Env = environment(),
     log("bench: ~p rounds, ~p rows, ~p ms per measurement; ~s~n",
         [Rounds, length(Rows), maps:get(duration, Opts), load()]),
-    Peers = maps:from_list([{I, bench_peer:start(I)} || I <- bench_peer:impls()]),
-    Results = lists:append([round(R, Rows, Peers, Opts, Raw) || R <- lists:seq(1, Rounds)]),
+    Impls = impls(Opts),
+    Peers = maps:from_list([{I, bench_peer:start(I)} || I <- Impls]),
+    PerRound = [round(R, Rows, Peers, Opts, Raw) || R <- lists:seq(1, Rounds)],
+    Results = lists:append([Rs || {_, _, Rs} <- PerRound]),
     [bench_peer:stop(P) || P <- maps:values(Peers)],
     file:close(Raw),
-    Report = report(Rows, Results, Env#{started => Stamp, finished_load => load(), opts => Opts}),
+    Report = [report(Rows, Results, Env#{started => Stamp, finished_load => load(), opts => Opts}),
+              "\nLoad average (1, 5, 15 min) at the start of each round:\n\n",
+              [io_lib:format("- round ~p: ~s~n", [R, L]) || {R, L, _} <- PerRound]],
     ReportFile = filename:join(Out, "report-" ++ Tag ++ ".md"),
-    ok = file:write_file(ReportFile, Report),
+    ok = file:write_file(ReportFile, unicode:characters_to_binary(Report)),
     io:put_chars(Report),
     log("~nraw: ~s~nreport: ~s~n", [RawFile, ReportFile]),
     ok.
+
+impls(#{ab_trace_store := true}) -> [catalina, ti, catalina_notrace];
+impls(_) -> [catalina, ti].
 
 select(Rows, []) -> Rows;
 select(Rows, Only) -> [R || R = {Id, _, _} <- Rows, lists:member(Id, Only)].
 
 round(R, Rows, Peers, Opts, Raw) ->
-    Order = case R rem 2 of 1 -> [catalina, ti]; 0 -> [ti, catalina] end,
-    log("round ~p (~s)~n", [R, load()]),
-    lists:append([[measure(R, Row, I, maps:get(I, Peers), Opts, Raw) || I <- Order] || Row <- Rows]).
+    Base = impls(Opts),
+    %% Rotate the order each round so no implementation always goes first.
+    Shift = (R - 1) rem length(Base),
+    Order = lists:nthtail(Shift, Base) ++ lists:sublist(Base, Shift),
+    wait_for_quiet(maps:get(max_load, Opts), erlang:monotonic_time(second) + 1800),
+    Load = load(),
+    log("round ~p (~s)~n", [R, Load]),
+    {R, Load, lists:append([[measure(R, Row, I, maps:get(I, Peers), Opts, Raw) || I <- Order] || Row <- Rows])}.
 
 measure(Round, {Id, Kind, Params}, Impl, Peer, Opts, Raw) ->
     Load = load(),
@@ -100,8 +128,10 @@ measure(Round, {Id, Kind, Params}, Impl, Peer, Opts, Raw) ->
     {ok, Port} = bench_peer:call(Peer, bench_node, start_server, [Server]),
     Metrics = try
         bench_load:wait_ready(Port, Tls, 120000),
-        run_row(Kind, Port, Peer, Params#{
-            warmup_ms => maps:get(warmup, Opts), duration_ms => maps:get(duration, Opts)})
+        bench_peer:call(Peer, bench_node, watch_start, [watched()]),
+        M0 = run_row(Kind, Port, Peer, Params#{
+            warmup_ms => maps:get(warmup, Opts), duration_ms => maps:get(duration, Opts)}),
+        maps:merge(M0, watched_metrics(bench_peer:call(Peer, bench_node, watch_stop, [])))
     after
         bench_peer:call(Peer, bench_node, stop_server, [5000])
     end,
@@ -150,6 +180,21 @@ settled_stats(Peer, Prev, Tries) ->
         false -> settled_stats(Peer, Now, Tries - 1)
     end.
 
+%% Node-wide processes every connection may touch: Beamtalk's trace store
+%% (BT-4066 monitors every actor through it). Their peak mailbox and
+%% reductions per second go in the raw results and the report.
+watched() -> [beamtalk_trace_store].
+
+watched_metrics(W) ->
+    maps:fold(fun(Name, #{peak_queue := Q, p99_queue := Q99, reductions := R,
+                          reduction_share := Share, seconds := S}, Acc) ->
+        K = fun(Suffix) -> list_to_atom(atom_to_list(Name) ++ Suffix) end,
+        Acc#{K("_peak_queue") => Q,
+             K("_p99_queue") => Q99,
+             K("_reductions_per_s") => R / max(S, 0.001),
+             K("_reduction_share_pct") => 100 * Share}
+    end, #{}, W).
+
 brief(echo, #{msgs_per_s := M, p50 := P50, p99 := P99, errors := E}) ->
     io_lib:format("~10.1f msg/s  p50 ~s  p99 ~s  errors ~p", [M, us(P50), us(P99), E]);
 brief(churn, #{msgs_per_s := M, p50 := P50, errors := E}) ->
@@ -165,6 +210,22 @@ us(undefined) -> "-";
 us(V) when V >= 1000 -> io_lib:format("~.2fms", [V / 1000]);
 us(V) -> io_lib:format("~wus", [round(V)]).
 
+%% Wait until the 1-minute load average is below Max, or the deadline.
+wait_for_quiet(undefined, _) -> ok;
+wait_for_quiet(Max, Deadline) ->
+    Load1 = load1(),
+    case Load1 < Max orelse erlang:monotonic_time(second) > Deadline of
+        true -> ok;
+        false ->
+            log("  load ~.2f >= ~p, waiting~n", [Load1, Max]),
+            timer:sleep(30000),
+            wait_for_quiet(Max, Deadline)
+    end.
+
+load1() ->
+    [L | _] = string:lexemes(load(), " "),
+    list_to_number(string:trim(L)).
+
 %% === Report ===
 
 %% Metrics reported per kind: {key, label, better}, where better says which
@@ -173,7 +234,11 @@ metrics(echo) ->
     [{msgs_per_s, "msg/s", higher}, {bytes_per_s, "MB/s", higher},
      {p50, "p50 µs", lower}, {p99, "p99 µs", lower}, {p999, "p99.9 µs", lower}];
 metrics(churn) ->
-    [{msgs_per_s, "conn/s", higher}, {p50, "p50 µs", lower}, {p99, "p99 µs", lower}];
+    [{msgs_per_s, "conn/s", higher}, {p50, "p50 µs", lower}, {p99, "p99 µs", lower},
+     {beamtalk_trace_store_peak_queue, "trace store peak mailbox", lower},
+     {beamtalk_trace_store_p99_queue, "trace store p99 mailbox", lower},
+     {beamtalk_trace_store_reductions_per_s, "trace store reductions/s", lower},
+     {beamtalk_trace_store_reduction_share_pct, "trace store % of node reductions", lower}];
 metrics(idle) ->
     [{bytes_per_conn, "node bytes/conn", lower},
      {handler_bytes_per_conn, "handler bytes/conn", lower},
@@ -197,7 +262,30 @@ report(Rows, Results, Env) ->
          maps:get(rounds, maps:get(opts, Env)), maps:get(duration, maps:get(opts, Env)),
          maps:get(warmup, maps:get(opts, Env)), maps:get(load, Env), maps:get(finished_load, Env)]),
     Lines = [row_lines(Id, Kind, Results) || {Id, Kind, _} <- Rows],
-    [Header, Lines].
+    [Header, Lines, ab_trace_store(Rows, Results)].
+
+%% Catalina against Catalina with the trace store detached, when measured.
+ab_trace_store(Rows, Results) ->
+    case [x || {_, catalina_notrace, _} <- Results] of
+        [] -> [];
+        _ ->
+            ["\n## Trace store A/B\n\n"
+             "Catalina as shipped against Catalina with the Beamtalk trace store's "
+             "telemetry handlers detached, in the same rounds. Cost is how much "
+             "faster the detached node is on the row's main throughput metric.\n\n"
+             "| Row | Catalina | Catalina, trace store detached | Trace store cost |\n"
+             "|---|---:|---:|---:|\n",
+             [begin
+                  With = median(values(Id, catalina, msgs_per_s, Results)),
+                  Without = median(values(Id, catalina_notrace, msgs_per_s, Results)),
+                  io_lib:format("| ~s | ~s | ~s | ~s |~n",
+                                [Id, fmt(msgs_per_s, With), fmt(msgs_per_s, Without), cost(With, Without)])
+              end || {Id, Kind, _} <- Rows, Kind =/= idle]]
+    end.
+
+cost(With, Without) when is_number(With), is_number(Without), Without > 0 ->
+    io_lib:format("~.1f%", [100 * (Without - With) / Without]);
+cost(_, _) -> "-".
 
 row_lines(Id, Kind, Results) ->
     [begin
@@ -232,7 +320,7 @@ fmt(_, undefined) -> "-";
 fmt(bytes_per_s, V) -> io_lib:format("~.1f", [V / 1.0e6]);
 fmt(processes_per_conn, V) -> io_lib:format("~.2f", [V]);
 fmt(_, V) when V >= 100 -> integer_to_list(round(V));
-fmt(_, V) -> io_lib:format("~.1f", [V]).
+fmt(_, V) -> io_lib:format("~.1f", [float(V)]).
 
 all(Key, Vs) -> lists:join(", ", [fmt(Key, V) || V <- Vs]).
 

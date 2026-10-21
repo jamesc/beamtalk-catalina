@@ -159,6 +159,8 @@ Two harnesses check Catalina under load. Neither is part of `just test`.
 ```bash
 just bench                  # Catalina vs Thousand Island, 5 interleaved rounds
 just bench --rounds 7 --duration 10000 --only echo_c100_64B,accept_tcp
+just bench --rounds 7 --max-load 8  # each round waits for a quiet machine (as in RESULTS.md)
+just bench --ab-trace-store --only accept_tcp  # also Catalina with Beamtalk's trace store detached
 just stress                 # the stress tests, with a 30-minute soak
 just stress --smoke         # smaller sizes and a 1-minute soak (as CI runs it)
 just stress --only fuzz,chaos --impl catalina
