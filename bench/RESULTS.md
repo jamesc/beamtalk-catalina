@@ -27,8 +27,15 @@ reports these numbers come from are summarised here, not checked in: rerun
     more than 2x slower).
   - **Single-connection 64 KiB echo, 0.43x.** Per-message dispatch overhead
     in the Beamtalk runtime, filed (§ Rows more than 2x slower).
-- **No pass/fail claim on performance.** Whether 0.1.0 ships with the
-  accept-rate gap is a decision on the trace-store issue, not on Catalina.
+- **Recommendation: go for 0.1.0.** Catalina's correctness is established:
+  every stress test passes, including the soak. Its own design matches
+  Thousand Island's message for message. The remaining gaps are all in the
+  Beamtalk runtime and filed, so they need no Catalina change, and Catalina
+  picks up their fixes with no code change. Release notes should state the
+  accept-rate limit (about a tenth of Thousand Island's on a busy node,
+  until BT-4103 or BT-4120 lands). Hold 0.1.0 only if connection-churn
+  throughput matters to the first users, and if so, hold it for BT-4103,
+  not for Catalina work.
 
 ## Setup
 
@@ -114,6 +121,17 @@ aggregates), in the same 7 rounds as Catalina and Thousand Island
 | Accept rate, 128 clients, conn/s | 15,973 | 32,289 | 31,355 | **51%** |
 | p50 latency, 32 clients | 3.1 ms | 0.98 ms | 0.93 ms | |
 
+Per round (accept_tcp, conn/s):
+
+| Round | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Catalina | 14,270 | 8,684 | 8,568 | 8,859 | 8,853 | 8,689 | 6,605 |
+| Catalina, trace store detached | 29,928 | 29,999 | 30,537 | 30,848 | 29,680 | 30,497 | 30,361 |
+| Thousand Island | 31,764 | 31,955 | 32,011 | 31,845 | 31,395 | 32,488 | 32,941 |
+
+The detached node is flat. The attached one steps down after round 1, so
+what degrades with use is in the trace-store path, not the core runtime.
+
 **The trace store costs 71% of accept throughput (51% at 128 clients) and
 is the limiter.** With it detached, Catalina's accept rate is at parity with
 Thousand Island (0.95x and 1.03x), flat across all seven rounds.
@@ -140,9 +158,19 @@ part of it grows after start-up:
   ran on a node that had already served the echo rows, are lower (3,131)
   than the A/B's (8,689).
 
-Whether this blocks 0.1.0 is decided on the trace-store issue (always-on
-aggregates keyed by {Class, Selector} only, with no per-actor slot or
-monitor). The data here supports that design.
+Both parts are filed: BT-4103 (always-on aggregates keyed by {Class,
+Selector} only, with no per-actor slot or monitor, which removes the whole
+cost) and BT-4120 (the free-list contention specifically). The data here
+supports BT-4103's design.
+
+## Remaining gaps and their issues
+
+| Gap | Ratio | Issues |
+|---|---|---|
+| Accept rate (connection churn) | 0.10x | BT-4103, BT-4120 |
+| TLS handshakes on a long-running node | 0.42x (0.88x fresh) | BT-4103, BT-4120 |
+| Single-connection 64 KiB echo | 0.43x | BT-4069, BT-4109, BT-4099, BT-4070 |
+| 10-connection 64 KiB echo | 0.67x | same |
 
 ## Rows more than 2x slower
 
@@ -178,7 +206,8 @@ The handler makes ~31 dynamic sends and 6 inherited self-sends per message.
 In a call-time profile, the dynamic-send machinery is ~54% of handler time,
 inherited-method lookup ~10%, and Catalina's own code ~10%. The Beamtalk
 costs are filed: BT-4069 (sealed-Value sends as direct calls, ~16 of the
-31), BT-4109 (inherited self-sends walk the class chain on every call,
+31), BT-4099 (constructing a Value, as `HandlerResult continue:` does on
+every message, is a call into the class process), BT-4109 (inherited self-sends walk the class chain on every call,
 0.40 µs against 0.023 µs for a local method), and BT-4070 (conditionals with
 literal blocks compile to sends, Low).
 
@@ -263,7 +292,9 @@ sizes the issue sets (10k-cycle leak check, 30-minute soak).
 | BT-4071 | `self hasField:` resolved through the xref index (20 µs per call) | fixed |
 | BT-4109 | Inherited self-sends walk the class chain on every call | open |
 | BT-4069 | Sends to a sealed-Value-typed receiver could call the class module directly | open (filed by another agent) |
-| trace store | Always-on aggregates per {Class, Selector}, no per-actor slot or monitor | open; decides the accept rate |
+| BT-4103 | Always-on aggregates per {Class, Selector}, no per-actor slot or monitor | open; decides the accept rate |
+| BT-4120 | The trace store's slot free list is one contended head: actor starts halve once actors have exited | open; the aging above |
+| BT-4099 | Constructing a Value is a call into the class process, even for a sealed Value | open (filed by another agent) |
 
 ## Reproducing
 
