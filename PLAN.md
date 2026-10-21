@@ -65,6 +65,15 @@ Two Beamtalk facts that shape the code (from `docs/ADR/0043`, `0065`):
   the blocked `accept`, the supervisor waits the whole shutdown timeout, kills
   it, and `terminate:` never runs. A blocked acceptor also cannot answer sync
   calls, so nothing may call it.
+- **Class-side socket code must run in the caller** (found in Phase 1). A
+  class method of an open class, or one not declared `class sealed`, runs in
+  the class's own process (ADR 0129), not the caller's. For a transport that
+  breaks `controlling_process` and `file:sendfile` (`not_owner`: the caller
+  owns the socket) and would serialise every blocking `accept`/`recv` behind
+  one process. So `TCPTransport`, `SSLTransport`, `TransportOptions`, the
+  test transports and any class-side helper that touches a socket or
+  `self()` are `sealed Object subclass:` with `class sealed` methods. No
+  diagnostic catches a transport that forgets (BT-4031).
 - **No `receive` in Beamtalk.** Thousand Island cancels its read timer *and*
   flushes a stale `:read_timeout` from the mailbox. Instead, every timer
   message carries a unique ref (`erlang:make_ref`) stored in state; a
@@ -85,13 +94,13 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 | `listener.ex` | 123 | `src/listener.bt` — Actor owning the listen sockets | Beamtalk |
 | `connection.ex` | 106 | `src/connection.bt` — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
 | `handler.ex` | 709 | `src/handler.bt` — abstract `Server` subclass; `src/handler_result.bt` | Beamtalk |
-| `handler_config.ex` | 39 | `src/handler_config.bt` | Beamtalk |
-| `server_config.ex` | 79 | `src/server_config.bt` | Beamtalk |
-| `socket.ex` | 273 | `src/socket.bt` | Beamtalk |
-| `transport.ex` | 271 | `src/transport.bt` (Protocol) + `src/transport_options.bt` (`resolveOptions:`) | Beamtalk |
-| `transports/tcp.ex` | 158 | `src/transports/tcp_transport.bt` | Beamtalk (FFI to `gen_tcp`/`inet`) |
-| `transports/ssl.ex` | 211 | `src/transports/ssl_transport.bt` | Beamtalk (FFI to `ssl`) |
-| `telemetry.ex` | 509 | `src/telemetry.bt` — spans + events | Beamtalk (FFI to `telemetry`) |
+| `handler_config.ex` | 39 | `src/handler_config.bt` (Phase 1) | Beamtalk |
+| `server_config.ex` | 79 | `src/server_config.bt` (Phase 1) | Beamtalk |
+| `socket.ex` | 273 | `src/socket.bt` (Phase 1) | Beamtalk |
+| `transport.ex` | 271 | `src/transport.bt` (Protocol) + `src/transport_options.bt` (`resolveOptions:`) (Phase 1) | Beamtalk |
+| `transports/tcp.ex` | 158 | `src/transports/tcptransport.bt` (Phase 1; the file name must match `TCPTransport`) | Beamtalk (FFI to `gen_tcp`/`inet`) |
+| `transports/ssl.ex` | 211 | `src/transports/ssltransport.bt` | Beamtalk (FFI to `ssl`) |
+| `telemetry.ex` | 509 | `src/catalina_telemetry.bt` — spans + events (not `Telemetry`, which is the stdlib facade's name, BT-4025) | Beamtalk (stdlib `Telemetry`, BT-4025) |
 | `logger.ex` | 151 | `src/logger.bt` (minimal) | Beamtalk, Phase 6 |
 | `process_label.ex` | 52 | one call to `proc_lib:set_label/1` in Handler | Beamtalk |
 
@@ -204,7 +213,45 @@ Outcome: the module map stands. (3) did not fail, so no `Task`-like worker
 is needed. The rules the spikes added are folded into Phases 2, 3 and 5
 below.
 
-### Phase 1: Config, TCP transport, Socket (`config_test`, `socket_test` TCP half, `transport_options_test`)
+### Phase 1: Config, TCP transport, Socket (`config_test`, `socket_test` TCP half, `transport_options_test`) — done (BT-4026)
+
+36 tests: `ServerConfigTest` 11 (the 7 of `config_test.exs` plus 4),
+`TransportOptionsTest` 7, `SocketTest` 17, plus the scaffold's
+`CatalinaTest`. Deviations from the plan below:
+
+- `ServerConfig` is a `sealed typed Value` (an `Object` holds no fields) and
+  its validating constructor is `fromOptions:`, because `Value new:` is
+  sealed. It also rejects unknown options, as `struct!/2` does, because
+  `new:` silently stores undeclared keys (BT-4030). Errors are plain `Error`
+  with Thousand Island's messages, without the RuntimeError/ArgumentError
+  split. Option names: `transport_module` → `transport`, `handler_module` →
+  `handler`, `genserver_options` → `genServerOptions`, the rest camelCased.
+- `HandlerConfig` lands here rather than in Phase 3: `Socket` is built from
+  one, as `Socket.new/4` is.
+- `Socket wrap: raw peername: p handlerConfig: hc span: s` is `Socket.new/4`.
+  `peername` answers `Result ok:` with the address captured at accept time,
+  overriding the field getter.
+- The `Transport` protocol has the 18 required class methods.
+  `handshake:timeout:` is optional, as in Elixir, and `Socket handshake`
+  detects it with `respondsTo:`, so it is documented on the protocol rather
+  than required by it.
+- Transports are sealed with `class sealed` methods (see "Two Beamtalk facts"
+  above). Two class-side constructors cannot be `class sealed` yet: `self
+  new`/`new:` in a direct-called class method raises badarg (BT-4029), so
+  `ServerConfig fromOptions:` stays an open class method and `Socket wrap:...`
+  uses the keyword constructor.
+- Stub errors are Beamtalk Symbols (`Result error: #not_secure`) while FFI
+  errors are Exceptions (`e reason =:= #closed`). Phase 3's `handleError:`
+  must accept both.
+- Tests: the server and `Handler` come in Phases 2-3, so `SocketTest` plays
+  the handler itself (accepts on a raw listen socket and wraps the
+  connection), and its telemetry cases move to Phase 5. The large-file
+  `sendfile` case sends 32 MiB, not 256 MiB, from a fixture actor that owns
+  the connection. `transport_options_test` cannot trace `gen_tcp:listen/2`
+  without `receive`, so it checks `TCPTransport listenOptions:` (exactly
+  what `listen:options:` passes) and listens for real.
+
+The plan as written:
 
 - `ServerConfig`: typed Object with the 16 options and their defaults; `new:`
   validates `handler` present, `numListenSockets <= numAcceptors`, `reuseport`
@@ -482,10 +529,25 @@ The rest of the phase:
 
 ### Phase 5: Telemetry (`telemetry_test`, telemetry assertions across suites)
 
-- All `(Erlang telemetry)` calls live in `src/telemetry.bt`, so the
-  `unresolved_ffi` warnings (BT-4022) and the per-call FFI cost (BT-4021)
-  sit in one place. Each call site carries `@expect unresolved_ffi` until
-  BT-4022 lands.
+- **Target the stdlib `Telemetry` facade (BT-4025)**, not `(Erlang
+  telemetry)` FFI: `Telemetry execute: #(#catalina, #connection, #recv)
+  measurements: #{...} metadata: #{...}` for events, `Telemetry attach:
+  id to: event do: [:event :measurements :metadata | ...]` (and
+  `attach:toAll:do:`, `detach:`) in the test helper. The facade calls a
+  runtime module directly, so it avoids the per-call FFI cost (BT-4021) and
+  the `unresolved_ffi` warnings (BT-4022).
+- Catalina's span module is `CatalinaTelemetry` in
+  `src/catalina_telemetry.bt`: a class named `Telemetry` would collide with
+  the stdlib facade. Thousand Island's spans are its own struct (start event,
+  `span_event`/`untimed_span_event`, stop with a duration), not
+  `telemetry:span/3`, so they are built on `Telemetry execute:...`, not
+  `Telemetry span:...`.
+- **Interim, only if Phase 5 starts before BT-4025 lands:** the
+  `(Erlang telemetry)` calls live in `src/catalina_telemetry.bt` only, each
+  with `@expect unresolved_ffi`, behind the same methods, and the
+  `[native.dependencies]` telemetry entry stays. When BT-4025 lands, swap
+  the bodies for the facade and drop the dependency and the `@expect` lines;
+  nothing outside that file changes.
 
 - Spans `listener`, `acceptor`, `connection` with `monotonic_time`,
   `system_time`, `telemetry_span_context`, `parent_telemetry_span_context`,

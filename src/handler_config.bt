@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HandlerConfig — the part of a `ServerConfig` a connection handler needs,
+/// as Thousand Island's `ThousandIsland.HandlerConfig`. Built once per
+/// acceptor and sent to each handler with its ready message.
+///
+/// ## Examples
+/// ```beamtalk
+/// config := ServerConfig fromOptions: #{#handler => Object}
+/// (HandlerConfig fromServerConfig: config) readTimeout   // => 60000
+/// ```
+sealed typed Value subclass: HandlerConfig
+  field: handler :: Object = nil
+  field: transport :: Object = TCPTransport
+  field: readTimeout :: Object = 60000
+  field: handshakeTimeout :: Object = 5000
+  field: silentTerminateOnError :: Boolean = false
+
+  /// The handler fields of a server configuration.
+  class sealed fromServerConfig: config :: ServerConfig -> HandlerConfig =>
+    HandlerConfig
+      handler: config handler
+      transport: config transport
+      readTimeout: config readTimeout
+      handshakeTimeout: config handshakeTimeout
+      silentTerminateOnError: config silentTerminateOnError

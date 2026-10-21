@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Owns a connection and sends a whole file down it, as the
+/// `LargeSendfile` handler in `socket_test.exs` does. It runs in its own
+/// process so the test process can read while it sends.
+Actor subclass: SendfileHandler
+  state: sent = nil
+  state: monitoredBefore = nil
+  state: monitoredAfter = nil
+
+  /// Send the file and close the connection. Cast this with `!`.
+  sendfile: sock :: Socket path: path :: String =>
+    self.monitoredBefore := self monitoredBy
+    self.sent := sock
+      sendfile: path
+      offset: 0
+      length: 0
+    self.monitoredAfter := self monitoredBy
+    sock close
+
+  /// The `sendfile:offset:length:` result.
+  sent => self.sent
+
+  /// This process's `monitored_by` list.
+  monitoredBy =>
+    (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
+
+  /// Whether sending left no new monitor behind (the file was closed).
+  closedFile => self.monitoredBefore =:= self.monitoredAfter
