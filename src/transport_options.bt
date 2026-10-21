@@ -23,17 +23,18 @@
 /// TransportOptions resolveOptions: #({#backlog, 10})
 /// // => #({#mode, #binary}, {#active, false}, {#backlog, 10}, {#nodelay, true}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 /// ```
-sealed Object subclass: TransportOptions
+sealed typed Object subclass: TransportOptions
 
   /// Options Catalina needs and the user cannot override.
-  class sealed requiredOptions -> List => #({#mode, #binary}, {#active, false})
+  class sealed requiredOptions -> List(Object) =>
+    #({#mode, #binary}, {#active, false})
 
   /// Defaults the user can override.
-  class sealed defaultOptions -> List =>
+  class sealed defaultOptions -> List(Object) =>
     #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 
   /// Required, then user, then default options, first one per key wins.
-  class sealed resolveOptions: userOptions :: List -> List =>
+  class sealed resolveOptions: userOptions :: List(Object) -> List(Object) =>
     all := self requiredOptions
       ++ userOptions
       ++ (self defaultNodelayOptions: userOptions)
@@ -52,7 +53,7 @@ sealed Object subclass: TransportOptions
     resolved
 
   /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
-  class sealed defaultNodelayOptions: userOptions :: List -> List =>
+  class sealed defaultNodelayOptions: userOptions :: List(Object) -> List(Object) =>
     ((self isLocal: (Erlang proplists get_value: #ip with: userOptions)) or: [
       self isLocal: (Erlang proplists get_value: #ifaddr with: userOptions)
     ]) ifTrue: [#()] ifFalse: [#({#nodelay, true})]

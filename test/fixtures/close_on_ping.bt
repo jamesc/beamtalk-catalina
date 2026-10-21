@@ -4,4 +4,5 @@
 /// `HandleData.Closer`.
 RecordingHandler subclass: CloseOnPing
 
-  handleData: _data socket: _sock state: st => HandlerResult close: st
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult close: st

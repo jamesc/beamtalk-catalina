@@ -6,15 +6,17 @@
 /// timeout; local messages keep arriving.
 RecordingHandler subclass: PersistentWithLocal
 
-  handleData: data socket: _sock state: st =>
+  handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
+    text :: String := data
     self scheduleLocal
-    (data startsWith: "start") ifTrue: [
+    (text startsWith: "start") ifTrue: [
       HandlerResult continue: st persistentTimeout: 80
     ] ifFalse: [HandlerResult continue: st]
 
-  handleUserInfo: msg => msg =:= #localMessage ifTrue: [self scheduleLocal]
+  handleUserInfo: msg :: Object -> Object =>
+    msg =:= #localMessage ifTrue: [self scheduleLocal]
 
-  scheduleLocal =>
+  scheduleLocal -> Object =>
     Erlang erlang
       send_after: 10
       dest: self pid

@@ -5,14 +5,14 @@
 /// must not reset the read timer.
 RecordingHandler subclass: SendWhileReading
 
-  handleConnection: _sock state: st =>
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     Erlang erlang
       send_after: 1
       dest: self pid
       msg: #sendBytes
     HandlerResult continue: st
 
-  handleUserInfo: msg =>
+  handleUserInfo: msg :: Object -> Object =>
     msg =:= #sendBytes
       ifTrue: [
         self socket send: "A"

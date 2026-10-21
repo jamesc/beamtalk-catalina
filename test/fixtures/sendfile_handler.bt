@@ -4,13 +4,13 @@
 /// Owns a connection and sends a whole file down it, as the
 /// `LargeSendfile` handler in `socket_test.exs` does. It runs in its own
 /// process so the test process can read while it sends.
-Actor subclass: SendfileHandler
-  state: sent = nil
-  state: monitoredBefore = nil
-  state: monitoredAfter = nil
+typed Actor subclass: SendfileHandler
+  state: sent :: Result | Nil = nil
+  state: monitoredBefore :: List | Nil = nil
+  state: monitoredAfter :: List | Nil = nil
 
   /// Send the file and close the connection. Cast this with `!`.
-  sendfile: sock :: Socket path: path :: String =>
+  sendfile: sock :: Socket path: path :: String -> Result =>
     self.monitoredBefore := self monitoredBy
     self.sent := sock
       sendfile: path
@@ -20,11 +20,11 @@ Actor subclass: SendfileHandler
     sock close
 
   /// The `sendfile:offset:length:` result.
-  sent => self.sent
+  sent -> Result | Nil => self.sent
 
   /// This process's `monitored_by` list.
-  monitoredBy =>
+  monitoredBy -> List =>
     (Erlang erlang process_info: Erlang erlang self with: #monitored_by) at: 2
 
   /// Whether sending left no new monitor behind (the file was closed).
-  closedFile => self.monitoredBefore =:= self.monitoredAfter
+  closedFile -> Boolean => self.monitoredBefore =:= self.monitoredAfter

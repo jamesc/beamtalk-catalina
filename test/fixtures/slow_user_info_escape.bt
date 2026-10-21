@@ -5,18 +5,18 @@
 /// handler resets the read timeout with `handleContinuation:`.
 RecordingHandler subclass: SlowUserInfoEscape
 
-  handleConnection: _sock state: st =>
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     Erlang erlang send: self pid msg: #sleepThenSend
     HandlerResult continue: st
 
-  handleUserInfo: msg =>
+  handleUserInfo: msg :: Object -> Object =>
     msg match: [
       #sleepThenSend -> self sleepThenSend;
       #sendBytes -> self socket send: "A";
       _ -> nil
     ]
 
-  sleepThenSend =>
+  sleepThenSend -> Object =>
     Timer sleep: 150
     Erlang erlang
       send_after: 50

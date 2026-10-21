@@ -4,7 +4,7 @@
 /// `StatePasser`: closes on "ping"; `handleClose:` records the state.
 RecordingHandler subclass: StatePasser
 
-  handleData: data socket: _sock state: st =>
+  handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     data =:= "ping" ifTrue: [
       HandlerResult close: st
     ] ifFalse: [HandlerResult continue: st]

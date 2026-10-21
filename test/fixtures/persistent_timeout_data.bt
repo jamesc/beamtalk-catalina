@@ -6,7 +6,8 @@
 /// packet.)
 RecordingHandler subclass: PersistentTimeoutData
 
-  handleData: data socket: _sock state: st =>
-    (data startsWith: "ping") ifTrue: [
+  handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
+    text :: String := data
+    (text startsWith: "ping") ifTrue: [
       HandlerResult continue: st persistentTimeout: 50
     ] ifFalse: [HandlerResult continue: st]

@@ -4,4 +4,5 @@
 /// `HandleData.Exploding`.
 RecordingHandler subclass: RaiseOnPing
 
-  handleData: _data socket: _sock state: _st => Error signal: "nope"
+  handleData: _data :: Object socket: _sock :: Socket state: _st :: Object -> HandlerResult =>
+    Error signal: "nope"

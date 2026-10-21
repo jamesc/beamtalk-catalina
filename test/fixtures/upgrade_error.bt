@@ -5,7 +5,7 @@
 /// upgrade fails and `handleError:` gets `#unsupported_upgrade`.
 RecordingHandler subclass: UpgradeError
 
-  handleConnection: sock state: st =>
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
     sock send: "HELLO"
     HandlerResult
       switchTransport: TCPTransport

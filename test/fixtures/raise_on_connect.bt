@@ -4,4 +4,5 @@
 /// `HandleConnection.Exploding`.
 RecordingHandler subclass: RaiseOnConnect
 
-  handleConnection: _sock state: _st => Error signal: "nope"
+  handleConnection: _sock :: Socket state: _st :: Object -> HandlerResult =>
+    Error signal: "nope"

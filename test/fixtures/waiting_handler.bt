@@ -4,18 +4,20 @@
 /// `WaitingHandler` from `connection_test.exs`: it records its start, the
 /// ready message and its exit reason in the Ets table named by
 /// `handlerOptions`. It overrides `terminate:`, so it traps exits.
-Server subclass: WaitingHandler
-  state: handlerOptions = nil
+typed Server subclass: WaitingHandler
+  // The name of the Ets table to record in.
+  state: handlerOptions :: Symbol | Nil = nil
 
-  initialize => self record: #started value: self pid
+  initialize -> Nil => self record: #started value: self pid
 
-  handleInfo: msg =>
+  handleInfo: msg :: Object -> Object =>
     msg match: [
       {#catalina_ready, _raw, _config, _span, _start} -> self record: #ready value: self pid;
       _ -> nil
     ]
 
-  terminate: reason => self record: #terminated value: reason
+  terminate: reason :: Object -> Nil => self record: #terminated value: reason
 
-  record: key value: value =>
-    (Ets named: self.handlerOptions) at: key put: value
+  record: key :: Symbol value: value :: Object -> Nil =>
+    table :: Symbol := self.handlerOptions
+    (Ets named: table) at: key put: value

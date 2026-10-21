@@ -21,7 +21,7 @@
 /// TCPTransport isSecure          // => false
 /// TCPTransport close: ls         // => Result ok: nil
 /// ```
-sealed Object subclass: TCPTransport
+sealed typed Object subclass: TCPTransport
 
   /// Open a listen socket with the resolved options.
   class sealed listen: port :: Integer options: userOptions :: List -> Result =>
@@ -30,7 +30,7 @@ sealed Object subclass: TCPTransport
   /// The options `listen:options:` passes to `gen_tcp:listen/2`: the
   /// resolved options with `inet_backend`, which must come first, moved to
   /// the front.
-  class sealed listenOptions: userOptions :: List -> List =>
+  class sealed listenOptions: userOptions :: List(Object) -> List(Object) =>
     resolved := TransportOptions resolveOptions: userOptions
     backend := resolved select: [:option |
       (TransportOptions keyOf: option) =:= #inet_backend
@@ -131,5 +131,5 @@ sealed Object subclass: TCPTransport
 
   /// An FFI result with its error side turned from the boundary's
   /// Exception into the bare Erlang reason, as `Transport` promises.
-  class sealed bare: result :: Result -> Result =>
+  class sealed bare: result :: Result(Object, Exception) -> Result(Object, Object) =>
     result mapError: [:e | e reason]

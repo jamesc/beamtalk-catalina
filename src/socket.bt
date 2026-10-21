@@ -26,14 +26,17 @@
 /// sock peername   // => Result ok: {{127, 0, 0, 1}, 4000}
 /// sock isSecure   // => false
 /// ```
-sealed Value subclass: Socket
-  field: socket = nil
-  field: transport = TCPTransport
-  field: readTimeout = 60000
-  field: handshakeTimeout = 5000
-  field: peername = nil
-  field: silentTerminateOnError = false
-  field: span = nil
+sealed typed Value subclass: Socket
+  // The raw socket: a gen_tcp port, or an ssl socket record (Phase 4).
+  field: socket :: Object = nil
+  // A class conforming to `Transport` (see `ServerConfig`).
+  field: transport :: Dynamic = TCPTransport
+  field: readTimeout :: Integer | #infinity = 60000
+  field: handshakeTimeout :: Integer | #infinity = 5000
+  field: peername :: Tuple | Nil = nil
+  field: silentTerminateOnError :: Boolean = false
+  // The connection telemetry span (Phase 5).
+  field: span :: Object = nil
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
@@ -62,7 +65,7 @@ sealed Value subclass: Socket
   /// Upgrade the connection to `newTransport` (for example to TLS) and
   /// answer the Socket over the upgraded socket. `options` go to the new
   /// transport unchanged.
-  upgrade: newTransport options: options :: Object -> Result =>
+  upgrade: newTransport :: Dynamic options: options :: Object -> Result =>
     (newTransport upgrade: self.socket options: options) map: [:inner |
       (self withSocket: inner) withTransport: newTransport
     ]

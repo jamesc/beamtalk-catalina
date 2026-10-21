@@ -7,12 +7,12 @@
 ///
 /// Args: `#id`, `#server` and `#config`. The acceptor gets `#parent => self`
 /// to find its `#connections` sibling.
-Supervisor subclass: AcceptorSupervisor
+typed Supervisor subclass: AcceptorSupervisor
 
-  strategy => #restForOne
+  strategy -> SupervisionStrategy => #restForOne
 
-  childSpecs =>
-    config := self args at: #config
+  childSpecs -> List(SupervisionSpec) =>
+    config :: ServerConfig := self args at: #config
     #((ConnectionSupervisor supervisionSpec withId: #connections withArgs: config), (Acceptor supervisionSpec
       withId: #acceptor
       withRestart: #transient

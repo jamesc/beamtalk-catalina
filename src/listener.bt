@@ -17,12 +17,13 @@
 /// Args: `#config`, the server's `ServerConfig`. Restart: `#transient`.
 ///
 /// The listener telemetry span arrives in Phase 5.
-Actor subclass: Listener
-  state: config = nil
-  state: sockets = #()
-  state: localInfo = nil
+typed Actor subclass: Listener
+  state: config :: ServerConfig
+  state: sockets :: List(Object) = #()
+  // The first socket's `{ip, port}` (or `{local, path}`), set by `initialize`.
+  late state: localInfo :: Tuple
 
-  class supervisionPolicy => #transient
+  class supervisionPolicy -> RestartStrategy => #transient
 
   /// The start function `ServerSupervisor` uses (`withClassMethod:`). The
   /// supervisor runs it itself, and `spawnWith:` waits for `initialize`, so
@@ -38,19 +39,19 @@ Actor subclass: Listener
   class sealed socketIndexFor: id :: Integer count: n :: Integer -> Integer =>
     (id - 1) % n + 1
 
-  initialize => self openSockets
+  initialize -> Nil => self openSockets
 
   /// The local `{ip, port}` of the first listen socket.
-  listenerInfo => self.localInfo
+  listenerInfo -> Tuple => self.localInfo
 
   /// The listen socket acceptor `id` accepts on.
-  acceptorInfo: id :: Integer =>
+  acceptorInfo: id :: Integer -> Object =>
     self.sockets at: (Listener socketIndexFor: id count: self.sockets size)
 
   /// The listen sockets, in order.
-  listenSockets => self.sockets
+  listenSockets -> List(Object) => self.sockets
 
-  openSockets =>
+  openSockets -> Nil =>
     transport := self.config transport
     first := transport listen: self.config port options: self.config transportOptions
     first isError ifTrue: [self closeAllAndSignal: first error]
@@ -69,7 +70,7 @@ Actor subclass: Listener
 
   /// The port further sockets bind to: the one the OS gave the first
   /// socket, or the configured one for a non-IP (Unix domain) socket.
-  bindPort: info -> Object =>
+  bindPort: info :: Tuple -> Integer =>
     (((info isKindOf: Tuple) and: [
       info size =:= 2
     ]) and: [
@@ -77,7 +78,7 @@ Actor subclass: Listener
     ]) ifTrue: [info at: 2] ifFalse: [self.config port]
 
   /// Close what is open and fail the start with the transport's reason.
-  closeAllAndSignal: reason :: Object =>
+  closeAllAndSignal: reason :: Object -> Nil =>
     self.sockets do: [:s | self.config transport close: s]
     self.sockets := #()
     Error signal: "Listener could not open its sockets: " ++ reason printString

@@ -5,7 +5,7 @@
 /// eat into the read timeout, which starts when it returns.
 RecordingHandler subclass: SlowDataCallback
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     Timer sleep: 200
     Erlang erlang
       send_after: 50
@@ -13,4 +13,5 @@ RecordingHandler subclass: SlowDataCallback
       msg: #sendBytes
     HandlerResult continue: st
 
-  handleUserInfo: msg => msg =:= #sendBytes ifTrue: [self socket send: "A"]
+  handleUserInfo: msg :: Object -> Object =>
+    msg =:= #sendBytes ifTrue: [self socket send: "A"]

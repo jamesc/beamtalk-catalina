@@ -4,4 +4,5 @@
 /// `TimeoutInitial`: a 50 ms timeout for the first data.
 RecordingHandler subclass: TimeoutInitial
 
-  handleConnection: _sock state: st => HandlerResult continue: st timeout: 50
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult continue: st timeout: 50

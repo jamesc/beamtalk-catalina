@@ -4,6 +4,6 @@
 /// `HandleData.HelloWorld`.
 RecordingHandler subclass: HelloOnPing
 
-  handleData: _data socket: sock state: st =>
+  handleData: _data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
     sock send: "HELLO"
     HandlerResult continue: st

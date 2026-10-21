@@ -4,5 +4,5 @@
 /// `LongerOneShotTimeout`: "ping" sets a 400 ms one-shot timeout.
 RecordingHandler subclass: LongerOneShot
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st timeout: 400

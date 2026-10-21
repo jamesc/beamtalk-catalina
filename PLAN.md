@@ -181,6 +181,31 @@ are bare reasons" above. Raw FFI calls outside a transport still answer an
 Exception (`r error reason`, BT-3954), which the checker mistypes as the
 raw Symbol (BT-4023).
 
+## Typing rule (BT-4038)
+
+Every catalina class is `typed`, and so are the test fixtures. New code
+must build with zero type warnings: `beamtalk.toml`'s `[diagnostics]`
+makes `type`, `type-annotation` and `dnu` errors, and `just test` (which CI
+runs) adds `--warnings-as-errors`. An `@expect` is allowed only where a
+Beamtalk limitation forces it, with a comment and a Linear issue under
+BT-3957. The workarounds in place:
+
+- `Integer | #infinity` rather than the stdlib `Timeout` alias for fields
+  with an Integer default (BT-4039).
+- `(1 to: n) do:` into a List rather than `collect:`, whose block
+  parameter is untyped over an Interval (BT-4040).
+- `x :: T := ...` rather than `x :: T | Nil := ...` when narrowing a
+  `childWithId:` result, which is rejected (BT-4042); the `isNil` check
+  stays.
+- `transport` fields are `Dynamic`: a class conforming to a protocol's
+  class side has no type name. `HandlerResult transport` is `Object`
+  because `Dynamic = nil` warns (BT-4032).
+
+`Handler` being `typed` makes every handler subclass typed too, so a user's
+handler (Buccaneer's included) must annotate its callbacks. A subclass
+cannot narrow an inherited parameter type, so it narrows inside the method
+(`text :: String := data`).
+
 ## Phases
 
 Each phase ends green on `just ci` and with a commit. Tests mirror Thousand

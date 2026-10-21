@@ -7,16 +7,21 @@
 /// `"acceptor-N"`). Integer ids mint no atoms.
 ///
 /// Args: `#server` (the `ServerSupervisor`) and `#config`.
-Supervisor subclass: AcceptorPoolSupervisor
+typed Supervisor subclass: AcceptorPoolSupervisor
 
-  childSpecs =>
-    server := self args at: #server
-    config := self args at: #config
-    ((1 to: config numAcceptors)
-      collect: [:i |
-        AcceptorSupervisor supervisionSpec withId: i withArgs: #{
-          #id => i,
-          #server => server,
-          #config => config
-        }
-      ]) asList
+  childSpecs -> List(SupervisionSpec) =>
+    server :: ServerSupervisor := self args at: #server
+    config :: ServerConfig := self args at: #config
+    // `do:`, not `collect:`, over the Interval: its `collect:` block
+    // parameter is untyped (BT-4040).
+    specs := #()
+    (1 to: config numAcceptors)
+      do: [:i |
+        specs := specs
+          add: (AcceptorSupervisor supervisionSpec withId: i withArgs: #{
+            #id => i,
+            #server => server,
+            #config => config
+          })
+      ]
+    specs

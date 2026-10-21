@@ -4,5 +4,5 @@
 /// `TimeoutData`: a 50 ms timeout after "ping".
 RecordingHandler subclass: TimeoutData
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st timeout: 50

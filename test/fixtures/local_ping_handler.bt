@@ -5,17 +5,18 @@
 /// must not reset the read timer.
 RecordingHandler subclass: LocalPingHandler
 
-  handleConnection: _sock state: st =>
+  handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     self scheduleLocalPing
     HandlerResult continue: st
 
-  handleData: _data socket: _sock state: st =>
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     self note: #ping
     HandlerResult continue: st
 
-  handleUserInfo: msg => msg =:= #localPing ifTrue: [self scheduleLocalPing]
+  handleUserInfo: msg :: Object -> Object =>
+    msg =:= #localPing ifTrue: [self scheduleLocalPing]
 
-  scheduleLocalPing =>
+  scheduleLocalPing -> Object =>
     Erlang erlang
       send_after: 10
       dest: self pid

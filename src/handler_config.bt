@@ -11,11 +11,14 @@
 /// (HandlerConfig fromServerConfig: config) readTimeout   // => 60000
 /// ```
 sealed typed Value subclass: HandlerConfig
-  // `Dynamic = nil` would be the natural type; it warns (BT-4032).
-  field: handler :: Actor class | Nil = nil
+  field: handler :: Handler class | Nil = nil
+  // Any class conforming to `Transport`; a protocol's class side has no type
+  // name, so it is Dynamic.
   field: transport :: Dynamic = TCPTransport
-  field: readTimeout :: Object = 60000
-  field: handshakeTimeout :: Object = 5000
+  // `Integer | #infinity` rather than the `Timeout` alias, whose Integer
+  // defaults are rejected (BT-4039).
+  field: readTimeout :: Integer | #infinity = 60000
+  field: handshakeTimeout :: Integer | #infinity = 5000
   field: silentTerminateOnError :: Boolean = false
 
   /// The handler fields of a server configuration.
