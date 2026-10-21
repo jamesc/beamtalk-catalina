@@ -83,8 +83,14 @@ chaos(Ctx) ->
         stress_lib:wait_until(fun() ->
             lists:all(fun({_, A}) -> is_pid(A) end, stress_lib:node_call(Ctx, acceptors_by_supervisor, []))
         end, 5000, every_acceptor_running),
-        stress_lib:wait_until(fun() -> stress_lib:node_call(Ctx, connection_count, []) =:= 0 end,
-                              30000, connections_closed),
+        try
+            stress_lib:wait_until(fun() -> stress_lib:node_call(Ctx, connection_count, []) =:= 0 end,
+                                  30000, connections_closed)
+        catch
+            error:{timed_out_waiting_for, _} ->
+                %% Say which handlers are left and what they are waiting for.
+                error({connections_left_open, stress_lib:node_call(Ctx, connection_states, [])})
+        end,
         After = stress_lib:settle(Ctx, ?KEYS),
         Diff = maps:from_list([{K, {maps:get(K, Base), maps:get(K, After)}}
                                || K <- ?KEYS, maps:get(K, Base) =/= maps:get(K, After)]),

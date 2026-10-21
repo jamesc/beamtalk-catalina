@@ -36,6 +36,7 @@
     connection_supervisors/0,
     connection_count/0,
     connection_pids/0,
+    connection_states/0,
     handler_memory/0,
     kill_random_acceptor/0,
     kill_random_handler/0,
@@ -280,6 +281,15 @@ connection_count() ->
 
 connection_pids() ->
     [H || C <- connection_supervisors(), {_, H, _, _} <- safe_children(C), is_pid(H)].
+
+%% For diagnosing handlers that do not go away: each one's process label
+%% (set once it has its socket; `undefined` while it waits for the
+%% acceptor's handoff), what it is doing, and its mailbox.
+connection_states() ->
+    [{P, proc_lib:get_label(P),
+      element(2, erlang:process_info(P, current_function)),
+      element(2, erlang:process_info(P, message_queue_len))}
+     || P <- connection_pids(), erlang:is_process_alive(P)].
 
 %% Bytes of process memory across the handler processes.
 handler_memory() ->
