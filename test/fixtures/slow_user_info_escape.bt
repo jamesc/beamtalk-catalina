@@ -6,7 +6,7 @@
 RecordingHandler subclass: SlowUserInfoEscape
 
   handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
-    self pid send: #sleepThenSend
+    Erlang erlang send: self pid msg: #sleepThenSend
     HandlerResult continue: st
 
   handleUserInfo: msg :: Object -> Object =>
@@ -18,8 +18,8 @@ RecordingHandler subclass: SlowUserInfoEscape
 
   sleepThenSend -> Object =>
     Timer sleep: 150
-    Timer
-      send: #sendBytes
-      to: self
-      after: 50
+    Erlang erlang
+      send_after: 50
+      dest: self pid
+      msg: #sendBytes
     self handleContinuation: (HandlerResult continue: self userState)

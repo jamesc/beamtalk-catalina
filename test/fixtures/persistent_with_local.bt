@@ -17,7 +17,7 @@ RecordingHandler subclass: PersistentWithLocal
     msg =:= #localMessage ifTrue: [self scheduleLocal]
 
   scheduleLocal -> Object =>
-    Timer
-      send: #localMessage
-      to: self
-      after: 10
+    Erlang erlang
+      send_after: 10
+      dest: self pid
+      msg: #localMessage

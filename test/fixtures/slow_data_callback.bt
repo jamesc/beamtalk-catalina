@@ -7,10 +7,10 @@ RecordingHandler subclass: SlowDataCallback
 
   handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     Timer sleep: 200
-    Timer
-      send: #sendBytes
-      to: self
-      after: 50
+    Erlang erlang
+      send_after: 50
+      dest: self pid
+      msg: #sendBytes
     HandlerResult continue: st
 
   handleUserInfo: msg :: Object -> Object =>

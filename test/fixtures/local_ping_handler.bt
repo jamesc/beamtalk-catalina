@@ -17,7 +17,7 @@ RecordingHandler subclass: LocalPingHandler
     msg =:= #localPing ifTrue: [self scheduleLocalPing]
 
   scheduleLocalPing -> Object =>
-    Timer
-      send: #localPing
-      to: self
-      after: 10
+    Erlang erlang
+      send_after: 10
+      dest: self pid
+      msg: #localPing
