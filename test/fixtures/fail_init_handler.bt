@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `FailInitHandler` from `acceptor_test.exs`: a handler that cannot start,
+/// as one whose resource acquisition fails at connection setup would.
+Server subclass: FailInitHandler
+  state: handlerOptions = nil
+
+  initialize => Error signal: "intentional_init_failure"

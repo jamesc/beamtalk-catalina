@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// AcceptorPoolSupervisor — `numAcceptors` `AcceptorSupervisor`s with the
+/// integer ids `1..numAcceptors`, as Thousand Island's
+/// `ThousandIsland.AcceptorPoolSupervisor` (which ids them
+/// `"acceptor-N"`). Integer ids mint no atoms.
+///
+/// Args: `#server` (the `ServerSupervisor`) and `#config`.
+Supervisor subclass: AcceptorPoolSupervisor
+
+  childSpecs =>
+    server := self args at: #server
+    config := self args at: #config
+    ((1 to: config numAcceptors)
+      collect: [:i |
+        AcceptorSupervisor supervisionSpec withId: i withArgs: #{
+          #id => i,
+          #server => server,
+          #config => config
+        }
+      ]) asList

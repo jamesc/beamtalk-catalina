@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `FlakyTransport` from `acceptor_test.exs`: TCP, except that a test can
+/// queue errors for `accept:` and `controllingProcess:pid:` to answer
+/// before real calls resume. The queues are persistent terms, since the
+/// acceptor calling the transport is not the test process.
+sealed Object subclass: FlakyTransport
+
+  /// Errors the next `accept:` calls answer, in order.
+  class sealed acceptResults: reasons :: List -> Nil =>
+    Erlang persistent_term put: #catalinaFlakyAccept with: reasons
+    nil
+
+  /// Errors the next `controllingProcess:pid:` calls answer, in order.
+  class sealed controllingProcessResults: reasons :: List -> Nil =>
+    Erlang persistent_term put: #catalinaFlakyControllingProcess with: reasons
+    nil
+
+  /// Take the next queued error under `key`, or nil.
+  class sealed next: key :: Symbol -> Object =>
+    queue := Erlang persistent_term get: key with: #()
+    queue isEmpty ifTrue: [^nil]
+    Erlang persistent_term put: key with: queue rest
+    queue first
+
+  class sealed listen: port :: Integer options: _options :: List -> Result =>
+    (Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true})
+
+  class sealed accept: listenSocket :: Object -> Result =>
+    injected := self next: #catalinaFlakyAccept
+    injected isNil ifTrue: [
+      (Erlang gen_tcp) accept: listenSocket
+    ] ifFalse: [Result error: injected]
+
+  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
+    injected := self next: #catalinaFlakyControllingProcess
+    injected isNil ifTrue: [
+      (Erlang gen_tcp) controlling_process: socket with: pid
+    ] ifFalse: [Result error: injected]
+
+  class sealed handshake: socket :: Object -> Result => Result ok: socket
+
+  class sealed upgrade: _socket :: Object options: _options :: Object -> Result =>
+    Result error: #unsupported_upgrade
+
+  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
+    (Erlang gen_tcp)
+      recv: socket
+      with: length
+      with: timeout
+
+  class sealed send: socket :: Object data: data :: Object -> Result =>
+    (Erlang gen_tcp) send: socket with: data
+
+  class sealed sendfile: _socket :: Object filename: _filename :: String offset: _offset :: Integer length: _length :: Integer -> Result =>
+    Result error: #not_supported
+
+  class sealed getopts: socket :: Object options: options :: List -> Result =>
+    (Erlang inet) getopts: socket with: options
+
+  class sealed setopts: socket :: Object options: options :: List -> Result =>
+    (Erlang inet) setopts: socket with: options
+
+  class sealed shutdown: socket :: Object how: way :: Symbol -> Result =>
+    (Erlang gen_tcp) shutdown: socket with: way
+
+  class sealed close: socket :: Object -> Result =>
+    (Erlang gen_tcp) close: socket
+
+  class sealed sockname: socket :: Object -> Result =>
+    (Erlang inet) sockname: socket
+
+  class sealed peername: socket :: Object -> Result =>
+    (Erlang inet) peername: socket
+
+  class sealed peercert: _socket :: Object -> Result =>
+    Result error: #not_secure
+
+  class sealed isSecure -> Boolean => false
+
+  class sealed getstat: socket :: Object -> Result =>
+    (Erlang inet) getstat: socket
+
+  class sealed negotiatedProtocol: _socket :: Object -> Result =>
+    Result error: #protocol_not_negotiated
+
+  class sealed connectionInformation: _socket :: Object -> Result =>
+    Result error: #not_secure

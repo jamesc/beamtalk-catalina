@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `connection_test.exs`.
+TestCase subclass: ConnectionTest
+
+  testOwnershipTransferErrorClosesTheSocketAndTerminatesTheIdleHandler =>
+    table := Ets new: #catalinaConnectionTest type: #set
+    config := ServerConfig
+      fromOptions: #{
+        #handler => WaitingHandler,
+        #handlerOptions => #catalinaConnectionTest,
+        #shutdownTimeout => 1000
+      }
+    handlerConfig := (HandlerConfig fromServerConfig: config) withTransport: OwnershipErrorTransport
+    connections := ConnectionSupervisor spawnWith: config
+    rawSocket := {#catalinaConnectionTest, #badarg}
+    result := Connection
+      start: rawSocket
+      connections: connections
+      config: config
+      handlerConfig: handlerConfig
+      span: nil
+    self assert: result error equals: {#controlling_process, #badarg}
+    handlerPid := table at: #started
+    self assert: (table at: #controllingProcess) equals: handlerPid
+    self assert: (table at: #closed) equals: true
+    self assert: (table at: #terminated) equals: #shutdown
+    self assert: (table at: #ready) equals: nil
+    self deny: (self isAlive: handlerPid)
+    self assert: connections children equals: #()
+    connections stop
+    table delete
+
+  isAlive: pid -> Boolean => (Erlang erlang) is_process_alive: pid

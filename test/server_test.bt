@@ -1,0 +1,158 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The Phase 2 server tree end to end: `Catalina start:`, the supervision
+/// tree's shape, several servers on one node, and draining through the
+/// shutdown listener. The rest of `server_test.exs` (suspend, resume,
+/// status, stop with a wait) arrives in Phase 6.
+TestCase subclass: ServerTest
+
+  start: options :: Dictionary -> ServerSupervisor =>
+    (Catalina start: (options at: #port put: 0)) unwrap
+
+  portOf: srv :: ServerSupervisor -> Integer => srv listenerInfo unwrap at: 2
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  /// Send `data` and answer what comes back.
+  echo: data :: String on: client :: Object -> Object =>
+    (Erlang gen_tcp) send: client with: data
+    ((Erlang gen_tcp)
+      recv: client
+      with: 0
+      with: 1000) unwrap
+
+  testStartsAndEchoes =>
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 2}
+    client := self connect: (self portOf: srv)
+    self assert: (self echo: "HELLO" on: client) equals: "HELLO"
+    (Erlang gen_tcp) close: client
+    srv stop
+
+  testTreeShape =>
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 3}
+    self assert: (srv whichChildren collect: [:c |
+      c id
+    ]) equals: #(#listener, #acceptorPool, #shutdownListener)
+    pool := (srv childWithId: #acceptorPool) unwrap
+    @expect dnu
+    self assert: (pool whichChildren collect: [:c | c id]) equals: #(1, 2, 3)
+    accSup := srv acceptorSupervisors first
+    self assert: (accSup whichChildren collect: [:c |
+      c id
+    ]) equals: #(#connections, #acceptor)
+    self assert: (accSup whichChildren collect: [:c |
+      c status
+    ]) equals: #(#running, #running)
+    srv stop
+
+  testListenerInfoAnswersTheBoundAddress =>
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 1}
+    info := srv listenerInfo unwrap
+    self assert: (info at: 1) equals: {0, 0, 0, 0}
+    self assert: (info at: 2) > 0
+    srv stop
+
+  testConnectionPids =>
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 1}
+    self assert: srv connectionPids unwrap equals: #()
+    client := self connect: (self portOf: srv)
+    self echo: "x" on: client
+    self assert: srv connectionPids unwrap size equals: 1
+    (Erlang gen_tcp) close: client
+    20 timesRepeat: [
+      srv connectionPids unwrap isEmpty ifFalse: [Timer sleep: 10]
+    ]
+    self assert: srv connectionPids unwrap equals: #()
+    srv stop
+
+  testTwoServersRunIndependently =>
+    a := self start: #{#handler => EchoHandler, #numAcceptors => 2}
+    b := self start: #{#handler => EchoHandler, #numAcceptors => 2}
+    self deny: a =:= b
+    portA := self portOf: a
+    portB := self portOf: b
+    self deny: portA =:= portB
+    clientB := self connect: portB
+    self assert: (self echo: "B" on: clientB) equals: "B"
+    a stop
+    self deny: a isAlive
+    self assert: b isAlive
+    // b keeps serving its existing connection and accepts new ones.
+    self assert: (self echo: "STILL" on: clientB) equals: "STILL"
+    clientB2 := self connect: portB
+    self assert: (self echo: "NEW" on: clientB2) equals: "NEW"
+    // a's port is closed.
+    self
+      assert: ((Erlang gen_tcp)
+        connect: {127, 0, 0, 1}
+        with: portA
+        with: #()
+        with: 1000) isError
+    #(clientB, clientB2) do: [:c | (Erlang gen_tcp) close: c]
+    b stop
+
+  testNamedServer =>
+    srv := self
+      start: #{
+        #handler => EchoHandler,
+        #numAcceptors => 1,
+        #supervisorOptions => #({#name, #catalinaServerTestNamed})
+      }
+    self assert: (ServerSupervisor named: #catalinaServerTestNamed) unwrap equals: srv
+    // The name is taken while it runs.
+    again := Catalina
+      start: #{
+        #port => 0,
+        #handler => EchoHandler,
+        #supervisorOptions => #({#name, #catalinaServerTestNamed})
+      }
+    self assert: again error kind equals: #name_registered
+    srv stop
+    self assert: (ServerSupervisor named: #catalinaServerTestNamed) isError
+
+  testInvalidOptionsAreAnError =>
+    self assert: (Catalina start: #{#port => 0}) isError
+
+  testTakenPortIsAnError =>
+    ls := (TCPTransport listen: 0 options: #({#reuseaddr, false})) unwrap
+    port := (TCPTransport sockname: ls) unwrap at: 2
+    // Without reuseaddr on either socket, so the bind fails on every OS.
+    result := Catalina
+      start: #{
+        #port => port,
+        #handler => EchoHandler,
+        #numAcceptors => 1,
+        #transportOptions => #({#reuseaddr, false})
+      }
+    self assert: result isError
+    self assert: result error kind equals: #supervisor_start_failed
+    self assert: (result error printString includesSubstring: "eaddrinuse")
+    TCPTransport close: ls
+
+  testStoppingTheListenerEndsTheAcceptorsNormally =>
+    // What the shutdown listener does first on shutdown: with the listen
+    // socket closed, each #transient acceptor exits normally and stays down,
+    // while its connections keep running.
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 2}
+    client := self connect: (self portOf: srv)
+    self assert: (self echo: "A" on: client) equals: "A"
+    srv listener unwrap stop
+    accSups := srv acceptorSupervisors
+    50
+      timesRepeat: [
+        (accSups allSatisfy: [:s |
+          s whichChildren last status =:= #stopped
+        ]) ifFalse: [Timer sleep: 10]
+      ]
+    self assert: (accSups collect: [:s |
+      s whichChildren last status
+    ]) equals: #(#stopped, #stopped)
+    self assert: (self echo: "B" on: client) equals: "B"
+    (Erlang gen_tcp) close: client
+    srv stop

@@ -1,0 +1,138 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port of Thousand Island's `acceptor_test.exs`. `FlakyTransport` lets a
+/// test queue errors for `accept:` and `controllingProcess:pid:`. The
+/// telemetry assertions (`emfile`, `accept_error`, `spawn_error` events)
+/// move to Phase 5; the behaviour they accompany is checked here. The
+/// `:ignore` variant of the failing-handler test has no Beamtalk
+/// counterpart (an `initialize` cannot answer `ignore`), so only the
+/// raising one is ported.
+TestCase subclass: AcceptorTest
+
+  setUp =>
+    FlakyTransport acceptResults: #()
+    FlakyTransport controllingProcessResults: #()
+    self
+
+  /// The accept(2) retry list, plus `etimedout` and `einval`.
+  transientErrors -> List =>
+    #(#enetdown, #enetunreach, #ehostdown, #ehostunreach, #enonet, #eproto, #enoprotoopt, #eopnotsupp, #etimedout, #einval)
+
+  start: options :: Dictionary -> ServerSupervisor =>
+    (Catalina start: ((options at: #port put: 0) at: #numAcceptors put: 1)) unwrap
+
+  startFlaky =>
+    self start: #{#handler => EchoHandler, #transport => FlakyTransport}
+
+  portOf: srv :: ServerSupervisor -> Integer => srv listenerInfo unwrap at: 2
+
+  connect: port :: Integer -> Object =>
+    ((Erlang gen_tcp)
+      connect: {127, 0, 0, 1}
+      with: port
+      with: #(#binary, {#active, false})
+      with: 1000) unwrap
+
+  echo: data :: String on: client :: Object -> Object =>
+    (Erlang gen_tcp) send: client with: data
+    ((Erlang gen_tcp)
+      recv: client
+      with: 0
+      with: 1000) unwrap
+
+  /// The acceptor processes, observed through their supervisors (the
+  /// acceptors themselves are never called).
+  acceptorPids: srv :: ServerSupervisor -> List =>
+    srv acceptorSupervisors collect: [:accSup |
+      ((accSup childWithId: #acceptor) unwrap) pid
+    ]
+
+  testDescriptorExhaustionDoesNotTakeDownTheAcceptorOrItsConnections =>
+    srv := self startFlaky
+    port := self portOf: srv
+    accSups := srv acceptorSupervisors
+    existing := self connect: port
+    self assert: (self echo: "FIRST" on: existing) equals: "FIRST"
+    // Five failures is past the acceptor's restart budget, so crashing on
+    // each would take down its supervisor and its connections.
+    FlakyTransport acceptResults: #(#emfile, #enfile, #emfile, #enfile, #emfile)
+    fresh := self connect: port
+    Timer sleep: 800
+    self assert: (self echo: "STILL HERE" on: existing) equals: "STILL HERE"
+    self assert: (self echo: "HELLO" on: fresh) equals: "HELLO"
+    self assert: srv acceptorSupervisors equals: accSups
+    late := self connect: port
+    self assert: (self echo: "LATE" on: late) equals: "LATE"
+    #(existing, fresh, late) do: [:c | (Erlang gen_tcp) close: c]
+    srv stop
+
+  testTransientAcceptErrorsAreRetried =>
+    srv := self startFlaky
+    port := self portOf: srv
+    accSups := srv acceptorSupervisors
+    existing := self connect: port
+    self assert: (self echo: "FIRST" on: existing) equals: "FIRST"
+    FlakyTransport acceptResults: self transientErrors
+    fresh := self connect: port
+    Timer sleep: 300
+    self assert: (self echo: "STILL HERE" on: existing) equals: "STILL HERE"
+    self assert: (self echo: "HELLO" on: fresh) equals: "HELLO"
+    self assert: srv acceptorSupervisors equals: accSups
+    late := self connect: port
+    self assert: (self echo: "LATE" on: late) equals: "LATE"
+    #(existing, fresh, late) do: [:c | (Erlang gen_tcp) close: c]
+    srv stop
+
+  testAHandlerThatFailsToStartDoesNotCrashTheAcceptor =>
+    srv := self start: #{#handler => FailInitHandler}
+    port := self portOf: srv
+    before := self acceptorPids: srv
+    // Six in a row: past the acceptor's restart budget.
+    6
+      timesRepeat: [
+        client := self connect: port
+        // The server closes the accepted socket rather than leave it dangling.
+        result := (Erlang gen_tcp)
+          recv: client
+          with: 0
+          with: 1000
+        self assert: (ErrorReason of: result error) equals: #closed
+        (Erlang gen_tcp) close: client
+      ]
+    self assert: (self acceptorPids: srv) equals: before
+    self assert: srv isAlive
+    self assert: srv connectionPids unwrap equals: #()
+    srv stop
+
+  testAnOwnershipTransferFailureIsSurvivedAndTheNextConnectionServed =>
+    FlakyTransport controllingProcessResults: #(#badarg)
+    srv := self startFlaky
+    port := self portOf: srv
+    before := self acceptorPids: srv
+    rejected := self connect: port
+    result := (Erlang gen_tcp)
+      recv: rejected
+      with: 0
+      with: 1000
+    self assert: (ErrorReason of: result error) equals: #closed
+    (Erlang gen_tcp) close: rejected
+    accepted := self connect: port
+    self assert: (self echo: "NEXT" on: accepted) equals: "NEXT"
+    self assert: (self acceptorPids: srv) equals: before
+    self assert: srv isAlive
+    (Erlang gen_tcp) close: accepted
+    srv stop
+
+  testAnUnexpectedAcceptErrorRestartsTheAcceptor =>
+    srv := self startFlaky
+    port := self portOf: srv
+    before := self acceptorPids: srv
+    FlakyTransport acceptResults: #(#something_new)
+    client := self connect: port
+    // The acceptor raised and its supervisor restarted it; the new one
+    // serves the client still waiting in the backlog.
+    self assert: (self echo: "AGAIN" on: client) equals: "AGAIN"
+    self deny: (self acceptorPids: srv) =:= before
+    (Erlang gen_tcp) close: client
+    srv stop

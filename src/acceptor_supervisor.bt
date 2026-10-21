@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// AcceptorSupervisor — one acceptor and the connections it has started,
+/// as Thousand Island's `ThousandIsland.AcceptorSupervisor`. `restForOne`:
+/// if the connection supervisor dies, the acceptor restarts with it.
+///
+/// Args: `#id`, `#server` and `#config`. The acceptor gets `#parent => self`
+/// to find its `#connections` sibling.
+Supervisor subclass: AcceptorSupervisor
+
+  strategy => #restForOne
+
+  childSpecs =>
+    config := self args at: #config
+    #((ConnectionSupervisor supervisionSpec withId: #connections withArgs: config), (Acceptor supervisionSpec
+      withId: #acceptor
+      withRestart: #transient
+      withArgs: #{
+        #id => (self args at: #id),
+        #parent => self,
+        #server => (self args at: #server),
+        #config => config
+      }))

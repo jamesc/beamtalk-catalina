@@ -1,6 +1,0 @@
-// Copyright 2026 James Casey
-// SPDX-License-Identifier: Apache-2.0
-
-TestCase subclass: CatalinaTest
-
-  testBasic => self assert: (Catalina greet) equals: "Hello from catalina!"

@@ -86,13 +86,13 @@ Thousand Island → Catalina. One class per file, snake_case file names.
 | Thousand Island (`lib/`) | LOC | Catalina | Where |
 |---|---|---|---|
 | `thousand_island.ex` | 376 | `src/catalina.bt` — facade: `start:`, `stop`, `listenerInfo`, `connectionPids`, `suspend`, `resume`, `status`, `info` | Beamtalk (class-side over `ServerSupervisor spawnWith:`) |
-| `server.ex` | 80 | `src/server_supervisor.bt` (`restForOne`; `childSpecs` from `self args`, passes `#server => self`) | Beamtalk (needs BT-3963, BT-3962) |
-| `shutdown_listener.ex` | 44 | `src/shutdown_listener.bt` | Beamtalk (`Actor` with `terminate:`) |
-| `acceptor_pool_supervisor.ex` | 50 | `src/acceptor_pool_supervisor.bt` (`oneForOne`, `numAcceptors` children with integer ids `1..n`) | Beamtalk (needs BT-3963, BT-3962) |
+| `server.ex` | 80 | `src/server_supervisor.bt` (Phase 2) (`restForOne`; `childSpecs` from `self args`, passes `#server => self`) | Beamtalk (needs BT-3963, BT-3962) |
+| `shutdown_listener.ex` | 44 | `src/shutdown_listener.bt` (Phase 2) | Beamtalk (`Actor` with `terminate:`) |
+| `acceptor_pool_supervisor.ex` | 50 | `src/acceptor_pool_supervisor.bt` (Phase 2) (`oneForOne`, `numAcceptors` children with integer ids `1..n`) | Beamtalk (needs BT-3963, BT-3962) |
 | `acceptor_supervisor.ex` | 59 | `src/acceptor_supervisor.bt` (`restForOne`, passes `#parent => self`) + `src/connection_supervisor.bt` (`DynamicSupervisor`; `childClass`, `maxChildren`, `childShutdown` from `self args`) | Beamtalk (needs BT-3963, BT-3962, BT-3964, BT-3965) |
-| `acceptor.ex` | 172 | `src/acceptor.bt` — Server; parent lookups in a `continueWith:` step, then accept loop via self-message in `handleInfo:` | Beamtalk (needs BT-3966, BT-3968) |
-| `listener.ex` | 123 | `src/listener.bt` — Actor owning the listen sockets | Beamtalk |
-| `connection.ex` | 106 | `src/connection.bt` — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
+| `acceptor.ex` | 172 | `src/acceptor.bt` (Phase 2) — Server; parent lookups in a `continueWith:` step, then accept loop via self-message in `handleInfo:` | Beamtalk (needs BT-3966, BT-3968) |
+| `listener.ex` | 123 | `src/listener.bt` (Phase 2) — Actor owning the listen sockets | Beamtalk |
+| `connection.ex` | 106 | `src/connection.bt` (Phase 2) — start child, retry on `max_children`, `controlling_process`, send ready message | Beamtalk |
 | `handler.ex` | 709 | `src/handler.bt` — abstract `Server` subclass; `src/handler_result.bt` | Beamtalk |
 | `handler_config.ex` | 39 | `src/handler_config.bt` (Phase 1) | Beamtalk |
 | `server_config.ex` | 79 | `src/server_config.bt` (Phase 1) | Beamtalk |
@@ -274,7 +274,49 @@ The plan as written:
 - Tests spin up a raw `gen_tcp` listener on port 0 (like
   `beamtalk-http/test/httpserver_test.bt`) and exercise Socket against it.
 
-### Phase 2: Supervision tree, Listener, Acceptor, Connection (`listener_test`, `acceptor_test`, `connection_test`, `socket_reuse_test`)
+### Phase 2: Supervision tree, Listener, Acceptor, Connection (`listener_test`, `acceptor_test`, `connection_test`, `socket_reuse_test`) — done (BT-4027)
+
+65 tests in all, 29 of them new: `ListenerTest` 10, `AcceptorTest` 5,
+`ConnectionTest` 1, `SocketReuseTest` 5, and `ServerTest` 9. `ServerTest`
+covers the tree's shape, two independent servers on one node (stopping
+one leaves the other serving), named servers, start errors, and acceptors
+ending normally when the listener stops. The tree, the hang rule and the
+child lookups are as designed below. Deviations:
+
+- **The listener starts through `withClassMethod: #startFor:`, not
+  `withArgs:`.** A plain static actor child runs `initialize` after its
+  start has returned, so a listener that cannot bind (`eaddrinuse`) would
+  not fail the server's start. It would crash-loop until the server gave
+  up, while `Catalina start:` had already answered `ok:`. A `withClassMethod:`
+  factory runs in the supervisor and `spawnWith:` waits for `initialize`,
+  which gives Thousand Island's `{:stop, reason}` from `init/1` (BT-4033).
+- `Catalina start:` answers a `Result` (`ok:` the `ServerSupervisor`).
+  `listenerInfo` and `connectionPids` are instance methods on
+  `ServerSupervisor` (`srv listenerInfo`), and `connectionPids` answers the
+  handler pids. `suspend`, `resume`, `status` and `info` stay in Phase 6.
+- The handler is started with `startChild: #{#handlerOptions => opts}`, so
+  a handler declares `state: handlerOptions`. Phase 3's `Handler` takes
+  that over. `genServerOptions` is carried but unused (Beamtalk actors take
+  no gen_server options). `ConnectionSupervisor` is `DynamicSupervisor(Server)`
+  until `Handler` exists.
+- `Listener acceptorInfo:` answers the socket alone. The listener span joins
+  it in Phase 5, as do all telemetry events (the acceptor's `spawn_error`,
+  `econnaborted`, `accept_error` and `emfile`). The Elixir tests' telemetry
+  assertions move to Phase 5; the behaviour they accompany is tested here.
+- `ErrorReason of:` (new, `src/error_reason.bt`) normalises a transport
+  error: an Exception from FFI, or a plain value from a Beamtalk-built
+  `Result error:` such as a fake transport's. The acceptor classifies
+  `accept` errors with it.
+- Tests use small stand-in handlers in `test/fixtures/` (`EchoHandler`,
+  `WaitingHandler`, `FailInitHandler`) until `Handler` arrives. The
+  `:ignore` case of the failing-handler test has no Beamtalk counterpart,
+  so only the raising one is ported. The listener tests spawn a `Listener`
+  rather than calling `init/1` and `handle_call/3` directly, and use a free
+  port rather than a fixed 4004.
+- `ServerConfig`/`HandlerConfig` `handler` is typed `Actor class | Nil`
+  because `Dynamic = nil` warns (BT-4032).
+
+The plan as written:
 
 **Blocked by**, in order: **BT-3963** (instance-side supervisor
 configuration reading `self args`), then **BT-3962** (`spawnWith:` /

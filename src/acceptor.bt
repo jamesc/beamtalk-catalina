@@ -1,0 +1,99 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Acceptor — accepts connections on one listen socket and hands each to a
+/// new handler, as Thousand Island's `ThousandIsland.Acceptor`.
+///
+/// It starts with a `continueWith:` step, after its start has returned, so
+/// the lookups it makes there (the listener through the server, its
+/// `#connections` sibling through its parent) never call a supervisor that
+/// is waiting on it. Then a self-message, `#accept`, drives the loop: each
+/// `handleInfo: #accept` blocks in the transport's `accept:`, starts a
+/// connection and sends `#accept` again.
+///
+/// It must not override `terminate:` (Phase 0 spike 3): an actor that does
+/// traps exits, and a supervisor's shutdown would then wait behind the
+/// blocked `accept` for the whole shutdown timeout. While blocked it cannot
+/// answer calls either, so nothing calls it; observe it through its
+/// supervisor (`whichChildren`) or, from Phase 5, telemetry.
+///
+/// Accept errors, as in `acceptor.ex`:
+///
+/// | Error | Action |
+/// |---|---|
+/// | connection start failed (`#too_many_connections`, `{#spawn_error, R}`, `{#controlling_process, R}`) | event, accept again |
+/// | `econnaborted`, `einval` | event, accept again |
+/// | transient network errors (`enetdown`, `ehostunreach`, `etimedout`, ...) | `accept_error` event, accept again |
+/// | `emfile`, `enfile` | event, wait 100 ms, accept again |
+/// | `closed` (the listener stopped) | stop normally; `#transient`, so it stays down |
+/// | anything else | raise, so the supervisor restarts it |
+///
+/// Events are added in Phase 5.
+///
+/// Args: `#id`, `#parent` (its `AcceptorSupervisor`), `#server` and
+/// `#config`. Restart: `#transient`.
+Server subclass: Acceptor
+  state: id = nil
+  state: parent = nil
+  state: server = nil
+  state: config = nil
+  state: listenSocket = nil
+  state: connections = nil
+  state: handlerConfig = nil
+  state: count = 0
+
+  class supervisionPolicy => #transient
+
+  /// Errors `accept(2)` documents as retryable: conditions of one incoming
+  /// connection, not of the listener.
+  class sealed transientErrors -> List =>
+    #(#enetdown, #enetunreach, #ehostdown, #ehostunreach, #enonet, #eproto, #enoprotoopt, #eopnotsupp, #etimedout)
+
+  /// How long to pause when file descriptors run out (as Ranch does).
+  class sealed fdExhaustionWait -> Integer => 100
+
+  initialize => self continueWith: #attach
+
+  attach =>
+    listener := (self.server childWithId: #listener) unwrap
+    self.connections := (self.parent childWithId: #connections) unwrap
+    self.listenSocket := (listener withTimeout: 15000) acceptorInfo: self.id
+    self.handlerConfig := HandlerConfig fromServerConfig: self.config
+    self acceptNext
+
+  handleInfo: msg =>
+    msg match: [
+      #accept -> self acceptOnce;
+      _ -> nil
+    ]
+
+  acceptNext => Erlang erlang send: self pid msg: #accept
+
+  acceptOnce =>
+    result := self.config transport accept: self.listenSocket
+    result isOk ifTrue: [
+      self onAccepted: result value
+    ] ifFalse: [self onAcceptError: (ErrorReason of: result error)]
+
+  onAccepted: rawSocket =>
+    self.count := self.count + 1
+    Connection
+      start: rawSocket
+      connections: self.connections
+      config: self.config
+      handlerConfig: self.handlerConfig
+      span: nil
+    // A failed start is one connection's problem: Connection has closed the
+    // socket, so carry on (spawn_error event in Phase 5).
+    self acceptNext
+
+  onAcceptError: reason =>
+    (#(#econnaborted, #einval) includes: reason) ifTrue: [^self acceptNext]
+    (Acceptor transientErrors includes: reason) ifTrue: [^self acceptNext]
+    (#(#emfile, #enfile) includes: reason)
+      ifTrue: [
+        Timer sleep: Acceptor fdExhaustionWait
+        ^self acceptNext
+      ]
+    reason =:= #closed ifTrue: [^self stop]
+    Error signal: "Unexpected error in accept: " ++ reason printString

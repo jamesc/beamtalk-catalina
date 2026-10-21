@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ConnectionSupervisor — the handler processes one acceptor has started,
+/// as the `DynamicSupervisor` in Thousand Island's
+/// `ThousandIsland.AcceptorSupervisor`.
+///
+/// Its child class is the server's `handler`, at most `numConnections` of
+/// them, each given `shutdownTimeout` to stop. Handlers are `#temporary`:
+/// a connection that ends is not restarted.
+///
+/// Args: the server's `ServerConfig`.
+DynamicSupervisor(Server) subclass: ConnectionSupervisor
+
+  childClass => self args handler
+
+  maxChildren => self args numConnections
+
+  childShutdown => self args shutdownTimeout

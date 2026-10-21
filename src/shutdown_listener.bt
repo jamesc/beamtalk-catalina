@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ShutdownListener — stops the listener first when a server shuts down,
+/// so acceptors stop accepting while connections drain, as Thousand
+/// Island's `ThousandIsland.ShutdownListener`.
+///
+/// It is the server's last child, so the supervisor terminates it first.
+/// It overrides `terminate:`, which makes it trap exits, so the shutdown
+/// runs `terminate:`, which stops the listener. It finds the listener in a
+/// `continueWith:` step after it has started, never while the server is
+/// waiting on its start.
+///
+/// Args: `#server`, the `ServerSupervisor`. Restart: `#permanent`.
+Actor subclass: ShutdownListener
+  state: server = nil
+  state: listener = nil
+
+  class supervisionPolicy => #permanent
+
+  initialize => self continueWith: #attach
+
+  attach => self.listener := (self.server childWithId: #listener) unwrap
+
+  terminate: _reason =>
+    (self.listener notNil and: [
+      self.listener isAlive
+    ]) ifTrue: [self.listener stop]

@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Connection — starts a handler for an accepted socket and hands the socket
+/// to it, as Thousand Island's `ThousandIsland.Connection`. Runs in the
+/// acceptor, which owns the socket until the handoff.
+///
+/// 1. Start a handler under the acceptor's `ConnectionSupervisor`, retrying
+///    `maxConnectionsRetryCount` times, `maxConnectionsRetryWait` ms apart,
+///    while it is full (`#max_children`).
+/// 2. Make the handler the socket's owner (`controllingProcess:pid:`).
+/// 3. Send it `{#catalina_ready, rawSocket, handlerConfig, span, startTime}`.
+///
+/// The socket is still passive (`TransportOptions`), so no data reaches the
+/// handler before the ready message; the handler arms it.
+///
+/// Answers `Result ok: nil`, or `Result error:` with `#too_many_connections`,
+/// `{#spawn_error, reason}` or `{#controlling_process, reason}`. On every
+/// error the socket is closed, and after a failed handoff the idle handler
+/// is terminated too.
+///
+/// A handler is started with `#{#handlerOptions => config handlerOptions}`.
+sealed Object subclass: Connection
+
+  class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: Object -> Result =>
+    startTime := Erlang erlang monotonic_time
+    transport := handlerConfig transport
+    started := self
+      startChildOn: connections
+      args: #{#handlerOptions => config handlerOptions}
+      retries: config maxConnectionsRetryCount
+      wait: config maxConnectionsRetryWait
+    started isError
+      ifTrue: [
+        transport close: rawSocket
+        ^(self isMaxChildren: started error) ifTrue: [
+          Result error: #too_many_connections
+        ] ifFalse: [Result error: {#spawn_error, started error}]
+      ]
+    handler := started value
+    handedOff := transport controllingProcess: rawSocket pid: handler pid
+    handedOff isError
+      ifTrue: [
+        // Ownership stays here when the transfer fails: close the socket,
+        // then terminate the idle handler.
+        transport close: rawSocket
+        connections terminateChild: handler
+        ^Result error: {#controlling_process, ErrorReason of: handedOff error}
+      ]
+    Erlang erlang send: handler pid msg: {#catalina_ready, rawSocket, handlerConfig, span, startTime}
+    Result ok: nil
+
+  /// `startChild:`, retried while the supervisor is full.
+  class sealed startChildOn: connections :: ConnectionSupervisor args: args :: Dictionary retries: retries :: Integer wait: wait :: Integer -> Result =>
+    result := connections startChild: args
+    remaining := retries
+    [(self isMaxChildren: result) and: [remaining > 0]]
+      whileTrue: [
+        Timer sleep: wait
+        remaining := remaining - 1
+        result := connections startChild: args
+      ]
+    result
+
+  class sealed isMaxChildren: resultOrError :: Object -> Boolean =>
+    error := (resultOrError isKindOf: Result) ifTrue: [
+      resultOrError isError ifTrue: [resultOrError error] ifFalse: [nil]
+    ] ifFalse: [resultOrError]
+    (error isKindOf: Exception) and: [error kind =:= #max_children]
