@@ -173,6 +173,12 @@ ratio, with the machine, versions and load averages. It is written to
 (linger 0), so churn does not run out of ephemeral ports to `TIME_WAIT`.
 `bench/RESULTS.md` holds the release measurements.
 
+`bench/run.sh bench_profile --impl catalina --row echo_c10_64KiB` profiles one
+row: it runs the load from the harness VM while the server node records call
+time (or `--type call_count`) for every function, and prints the top functions
+and modules. It reads the breakpoints directly rather than through `tprof` or
+`eprof`, which crash on Beamtalk modules (they export no `module_info/1`).
+
 **`just stress`** (`test/stress/`) runs each test against Catalina and,
 where the expectation is "as Thousand Island does", against Thousand Island
 with the same assertions:
