@@ -780,6 +780,14 @@ the stdlib facade.
 
 The plan as written:
 
+- **Known gap (BT-4057).** `Handler raised:on:` (PR #13) emits the
+  `exception` event, then re-raises with `error signal`. That raises a
+  caught `ExitError`/`ThrowError` as an error with a new stacktrace, so a
+  callback calling `exit(normal)` ends the connection abnormally, where
+  Thousand Island's `:erlang.raise(kind, reason, stack)` ends it normally.
+  When `Exception>>pass` lands, switch to it, and test that `exit(normal)`
+  ends the connection cleanly.
+
 - Also the minimal `Logger` from Phase 6: attach a `Telemetry` handler that
   logs at `#error`/`#info`/`#debug`/`#trace`. Name it so it does not clash
   with the stdlib `Logger` class (`CatalinaLogger`).
