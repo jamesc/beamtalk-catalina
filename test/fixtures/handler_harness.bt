@@ -8,11 +8,15 @@
 /// field).
 sealed typed Object subclass: HandlerHarness
 
-  /// Start a one-acceptor server for `handler`, merging `options` into the
+  /// Start a one-acceptor server for `handler` (on port 0 unless `options`
+  /// names one), merging `options` into the
   /// server options and `#table => name` into `handlerOptions`, and answer
   /// its port.
   class sealed start: handler :: Class options: options :: Dictionary table: name :: Symbol -> Integer =>
-    all := ((options at: #port put: 0) at: #handler put: handler) at: #numAcceptors put: 1
+    withPort := (options includesKey: #port) ifTrue: [
+      options
+    ] ifFalse: [options at: #port put: 0]
+    all := (withPort at: #handler put: handler) at: #numAcceptors put: 1
     handlerOptions :: Dictionary := all at: #handlerOptions ifAbsent: [#{}]
     all := all at: #handlerOptions put: (handlerOptions at: #table put: name)
     srv := (Catalina start: all) unwrap
@@ -51,8 +55,12 @@ sealed typed Object subclass: HandlerHarness
     self findEntry: tag in: name
 
   class sealed findEntry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
+    (self entries: tag in: name) detect: [:t | true] ifNone: [nil]
+
+  /// Every logged `{tag, ...}` tuple, in order.
+  class sealed entries: tag :: Symbol in: name :: Symbol -> List(Tuple) =>
     tuples :: List(Tuple) := (self logIn: name) select: [:e | e isKindOf: Tuple]
-    tuples detect: [:t | (t at: 1) =:= tag] ifNone: [nil]
+    tuples select: [:t | (t at: 1) =:= tag]
 
   // === TLS clients ===
 

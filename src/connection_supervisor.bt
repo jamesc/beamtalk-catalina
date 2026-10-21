@@ -10,6 +10,12 @@
 /// a connection that ends is not restarted.
 ///
 /// Args: the server's `ServerConfig`.
+///
+/// ## Examples
+/// ```beamtalk
+/// connections := (srv acceptorSupervisors first childWithId: #connections) unwrap
+/// connections count   // => the handlers this acceptor started
+/// ```
 typed DynamicSupervisor(Handler) subclass: ConnectionSupervisor
 
   childClass -> Class => self config handler

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Whoami` from `server_test.exs`: logs its pid and keeps the connection,
+/// then sends "ready" so the test knows it has started.
+RecordingHandler subclass: Whoami
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    self note: {#pid, self pid}
+    sock send: "ready"
+    HandlerResult continue: st

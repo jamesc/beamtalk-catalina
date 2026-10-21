@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `Echo` from `server_test.exs`: `handleConnection:` blocks reading one
+/// packet, echoes it and closes.
+Handler subclass: BlockingEcho
+
+  handleConnection: sock :: Socket state: st :: Object -> HandlerResult =>
+    received := sock recv
+    received isOk ifTrue: [sock send: received value]
+    HandlerResult close: st

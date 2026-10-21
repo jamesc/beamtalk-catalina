@@ -7,6 +7,13 @@
 ///
 /// Args: `#id`, `#server` and `#config`. The acceptor gets `#parent => self`
 /// to find its `#connections` sibling.
+///
+/// ## Examples
+/// ```beamtalk
+/// accSup := srv acceptorSupervisors first
+/// accSup whichChildren collect: [:c | c id]   // => #(#connections, #acceptor)
+/// (accSup terminateChild: #acceptor) unwrap    // what `srv suspend` does
+/// ```
 typed Supervisor subclass: AcceptorSupervisor
 
   strategy -> SupervisionStrategy => #restForOne

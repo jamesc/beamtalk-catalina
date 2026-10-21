@@ -7,6 +7,12 @@
 /// `"acceptor-N"`). Integer ids mint no atoms.
 ///
 /// Args: `#server` (the `ServerSupervisor`) and `#config`.
+///
+/// ## Examples
+/// ```beamtalk
+/// pool := (srv childWithId: #acceptorPool) unwrap
+/// pool whichChildren collect: [:c | c id]   // => #(1, 2, 3)
+/// ```
 typed Supervisor subclass: AcceptorPoolSupervisor
 
   childSpecs -> List(SupervisionSpec) =>

@@ -112,6 +112,17 @@ Choosing:
 
 Class variables shared by all instances are declared with `classState:`.
 
+## Thousand Island cross-reference
+
+Catalina ports Thousand Island 1.6.0 module for module. `PLAN.md` § Module
+map gives the file for each module, and each phase section lists the tests
+ported and every deviation. When behaviour is in doubt, Thousand Island's
+`lib/` and `test/` are the spec: read the module in question at
+https://github.com/mtrudel/thousand_island/tree/1.6.0. Elixir names map to
+camelCase (`num_acceptors` → `numAcceptors`, `handle_data/3` →
+`handleData:socket:state:`), and `{:error, reason}` maps to `Result error:
+reason` with the bare reason.
+
 ## Typing rule
 
 Every catalina class is `typed`, test fixtures included: annotate every

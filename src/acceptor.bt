@@ -32,6 +32,12 @@
 ///
 /// Args: `#id`, `#parent` (its `AcceptorSupervisor`), `#server` and
 /// `#config`. Restart: `#transient`.
+///
+/// ## Examples
+/// ```beamtalk
+/// // Never called directly: observe it through its supervisor.
+/// srv acceptorSupervisors first whichChildren last status   // => #running
+/// ```
 typed Server subclass: Acceptor
   // The start args: supplied at spawn, so plain typed slots rather than
   // `late`.
