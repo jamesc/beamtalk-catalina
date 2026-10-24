@@ -224,18 +224,22 @@ cannot narrow an inherited parameter type, so it narrows inside the method
 Each phase ends green on `just ci` and with a commit. Tests mirror Thousand
 Island's `test/` file-by-file; the Elixir suite is the spec.
 
-### Phase 0: Spikes (half a day) — done (BT-4019)
+### Phase 0: Spikes (half a day) — done (BT-4019), spikes retired
 
-All six hold, two with conditions that the later phases must keep. Results,
-numbers and how to run them: [`spikes/README.md`](spikes/README.md).
+All six held, two with conditions that the later phases kept. The spikes
+were throwaway BUnit tests, retired once the real suites pinned every
+assumption (spike 5's FFI assumption was superseded by Phase 5's stdlib
+facade, spike 6's numbers by the `bench/` harness); git history keeps the
+code and the full results table.
 
 - (2) holds only while the accepted socket is passive until the handler arms
   it after the ready message (`TransportOptions`' required `active false` is
   load-bearing).
 - (3) holds only for an acceptor that does not override `terminate:` (see
   "Two Beamtalk facts" above). No `Task`-like worker is needed.
-- (5) needs `telemetry` in `[native.dependencies]` (added), and every
-  `(Erlang telemetry)` site warns until BT-4022 is fixed.
+- (5) needed `telemetry` in `[native.dependencies]` at the time; Phase 5
+  replaced the raw `(Erlang telemetry)` FFI with the stdlib `Telemetry`
+  facade and removed the native dep again.
 - (6) `handleInfo:` dispatch is ~0.4 µs; each inline FFI call is ~7-15 µs
   (BT-4021), so FFI calls, not `handleInfo:`, dominate per-packet cost.
 
@@ -656,7 +660,8 @@ The plan as written:
   `switch_transport` path (note the Elixir quirk that passes an integer
   timeout as a GenServer timeout; decide whether to reproduce or fix, and
   document).
-- Lazy read timer (proven by spike 4, `spikes/fixtures/read_timeout_server.bt`):
+- Lazy read timer (proven by spike 4, now `armReadTimer:`/`onReadTimeout:`
+  in `src/handler.bt`):
   `readDeadline`, `send_after` only when no timer is running
   or the new deadline is earlier; on fire re-arm for the remainder or time out;
   timer messages are ref-tagged so a stale one is ignored instead of flushed;
