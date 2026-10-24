@@ -44,11 +44,6 @@ jobs:
       - name: Test
         run: just test
 
-      # Phase 0 spikes: loopback sockets and timing, informational only.
-      - name: Spikes
-        run: just spikes
-        continue-on-error: true
-
       # BT-4051: short versions of `just bench` and `just stress`. Shared
       # runners make the numbers noisy, so these are informational only.
       - name: Bench smoke

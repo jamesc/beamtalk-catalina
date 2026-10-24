@@ -143,7 +143,6 @@ just test     # BUnit tests (fails on any warning)
 just lint
 just fmt      # check formatting (just fmt-fix to apply)
 just ci       # all of the above, as CI runs them
-just spikes   # the Phase 0 spikes (loopback sockets and timing)
 just bench    # Catalina vs Thousand Island (see below)
 just stress   # correctness under load and failure (see below)
 ```

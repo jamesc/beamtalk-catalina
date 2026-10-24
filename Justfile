@@ -12,14 +12,6 @@ build:
 test:
     beamtalk test --warnings-as-errors
 
-# Run the Phase 0 spikes (loopback sockets and timers; not part of `test`)
-spikes:
-    #!/usr/bin/env bash
-    status=0
-    beamtalk test spikes -j 1 || status=$?
-    cat _build/spikes/echo_bench.txt 2>/dev/null && echo
-    exit $status
-
 # Benchmark Catalina against Thousand Island, interleaved (README § Benchmarks and stress tests)
 bench *ARGS:
     bench/run.sh bench_main {{ARGS}}
