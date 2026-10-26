@@ -110,7 +110,7 @@ sealed typed Object subclass: SSLTransport
 
   /// Send a String or iodata.
   class sealed send: socket :: Object data: data :: Object -> Result(Nil, Object) =>
-    TransportResult bare: ((Erlang ssl) send: socket with: data)
+    TransportResult bare: ((Erlang ssl) send: socket with: (TransportOptions unwrapData: data))
 
   /// Send `length` bytes of a file from `offset` (0: to the end), in
   /// `sendfileChunkSize` chunks, and answer the bytes sent.

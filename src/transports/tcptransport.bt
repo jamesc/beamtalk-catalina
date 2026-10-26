@@ -71,7 +71,7 @@ sealed typed Object subclass: TCPTransport
 
   /// Send a String or iodata.
   class sealed send: socket :: Object data: data :: Object -> Result(Nil, Object) =>
-    TransportResult bare: ((Erlang gen_tcp) send: socket with: data)
+    TransportResult bare: ((Erlang gen_tcp) send: socket with: (TransportOptions unwrapData: data))
 
   /// Send part of a file with `file:sendfile/5`, closing the file afterwards.
   class sealed sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
