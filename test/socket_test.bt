@@ -59,6 +59,20 @@ TestCase subclass: SocketTest
     sock close
     (Erlang gen_tcp) close: client
 
+  testSendsIodataHoldingStrings =>
+    client := self connect
+    sock := self accept
+    self assert: (sock send: #("HEL", #("L", Binary fromBytes: #(79)), "\r\n")) isOk
+    self
+      assert: (HandlerHarness
+        textOf: (((Erlang gen_tcp)
+          recv: client
+          with: 7
+          with: 2000) unwrap))
+      equals: "HELLO\r\n"
+    sock close
+    (Erlang gen_tcp) close: client
+
   testClosesConnections =>
     client := self connect
     sock := self accept

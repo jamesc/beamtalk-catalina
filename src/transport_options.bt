@@ -47,6 +47,13 @@ sealed typed Object subclass: TransportOptions
   class sealed unwrapStrings: options :: List(Object) -> List(Object) =>
     (Erlang beamtalk_primitive) deep_unwrap_strings: options
 
+  /// Send data as stock iodata (BT-4173): a String, a Binary, or a list of
+  /// them nested any depth. The proxy unwraps a top-level String but not
+  /// one inside a list, which `gen_tcp:send`/`ssl:send` reject (`einval`).
+  @expect type
+  class sealed unwrapData: data :: Object -> Object =>
+    (Erlang beamtalk_primitive) deep_unwrap_strings: data
+
   /// Required, then user, then default options, first one per key wins.
   class sealed resolveOptions: userOptions :: List(Object) -> List(Object) =>
     all := self requiredOptions
