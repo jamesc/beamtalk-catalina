@@ -74,11 +74,11 @@ TestCase subclass: SecureSocketTest
     port := self start: SendfileOnConnect
     client := self connect: port
     received := ""
-    [received byteSize < 9]
+    [received size < 9]
       whileTrue: [
         chunk := self recv: client
-        (chunk isKindOf: Binary) ifTrue: [
-          received := received ++ (HandlerHarness textOf: chunk)
+        (chunk isKindOf: String) ifTrue: [
+          received := received ++ chunk
         ] ifFalse: [^self fail: "closed early"]
       ]
     self assert: received equals: "ABCDEFBCD"
@@ -100,8 +100,8 @@ TestCase subclass: SecureSocketTest
     [done]
       whileFalse: [
         chunk := self recv: client
-        (chunk isKindOf: Binary) ifTrue: [
-          received := received + chunk byteSize
+        (chunk isKindOf: String) ifTrue: [
+          received := received + chunk size
         ] ifFalse: [done := true]
       ]
     self assert: received equals: size

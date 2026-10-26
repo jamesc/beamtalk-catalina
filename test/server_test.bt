@@ -22,10 +22,11 @@ TestCase subclass: ServerTest
   /// Send `data` and answer what comes back.
   echo: data :: String on: client :: Object -> Object =>
     (Erlang gen_tcp) send: client with: data
-    ((Erlang gen_tcp)
-      recv: client
-      with: 0
-      with: 1000) unwrap
+    HandlerHarness
+      textOf: (((Erlang gen_tcp)
+        recv: client
+        with: 0
+        with: 1000) unwrap)
 
   testStartsAndEchoes =>
     srv := self start: #{#handler => EchoHandler, #numAcceptors => 2}

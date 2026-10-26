@@ -55,7 +55,7 @@ sealed typed Object subclass: SSLTransport
         Error signal: "transportOptions must include one of certfile, cert, sni_hosts or sni_fun"
       ]
     self ensureStarted
-    TransportResult bare: ((Erlang ssl) listen: port with: resolved)
+    TransportResult bare: ((Erlang ssl) listen: port with: (TransportOptions unwrapStrings: resolved))
 
   /// Whether `options` defines any of `keys`.
   class sealed defines: keys :: List(Symbol) in: options :: List(Object) -> Boolean =>
@@ -84,7 +84,8 @@ sealed typed Object subclass: SSLTransport
   /// Upgrade an accepted clear-TCP socket to TLS with server `options`.
   class sealed upgrade: socket :: Object options: options :: Object -> Result(Port | Tuple, Object) =>
     self ensureStarted
-    self handshaken: ((Erlang ssl) handshake: socket with: options)
+    opts :: List(Object) := options
+    self handshaken: ((Erlang ssl) handshake: socket with: (TransportOptions unwrapStrings: opts))
 
   /// `ssl:handshake/2`'s answer as a `Result`. Its `{ok, Socket, Extensions}`
   /// form is a 3-tuple, which the FFI boundary leaves alone (ADR 0076).
@@ -156,7 +157,7 @@ sealed typed Object subclass: SSLTransport
                     done := true
                   ]
                   ifFalse: [
-                    sent := sent + data byteSize
+                    sent := sent + data size
                     done := length > 0 and: [sent >= length]
                   ]
               ]
@@ -204,8 +205,13 @@ sealed typed Object subclass: SSLTransport
     TransportResult bare: ((Erlang ssl) getstat: socket)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
-  class sealed negotiatedProtocol: socket :: Object -> Result(Binary, Object) =>
-    TransportResult bare: ((Erlang ssl) negotiated_protocol: socket)
+  class sealed negotiatedProtocol: socket :: Object -> Result(String, Object) =>
+    // BT-4173: the ALPN id is text (IANA-registered ASCII) — answer a
+    // String, not the socket's bytes.
+    answer := TransportResult bare: ((Erlang ssl) negotiated_protocol: socket)
+    answer isOk ifFalse: [^answer]
+    bytes :: Binary := answer value
+    Result ok: bytes asStringUnchecked
 
   /// `ssl:connection_information/1`: protocol, cipher suite and so on.
   class sealed connectionInformation: socket :: Object -> Result(List, Object) =>

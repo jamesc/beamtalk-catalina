@@ -48,7 +48,9 @@ TestCase subclass: SurfaceTest
       recv: client
       length: 0
       timeout: 3000
-    result isOk ifTrue: [result value] ifFalse: [result error]
+    result isOk ifTrue: [
+      HandlerHarness textOf: result value
+    ] ifFalse: [result error]
 
   /// The DelegatingHandler serving the connection.
   handler -> DelegatingHandler =>

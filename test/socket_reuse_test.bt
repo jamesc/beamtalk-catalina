@@ -39,10 +39,11 @@ TestCase subclass: SocketReuseTest
       with: #(#binary, {#active, false})
       with: 1000) unwrap
     (Erlang gen_tcp) send: client with: data
-    reply := ((Erlang gen_tcp)
-      recv: client
-      with: 0
-      with: 1000) unwrap
+    reply := HandlerHarness
+      textOf: (((Erlang gen_tcp)
+        recv: client
+        with: 0
+        with: 1000) unwrap)
     (Erlang gen_tcp) close: client
     reply
 

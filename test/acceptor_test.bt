@@ -41,10 +41,11 @@ TestCase subclass: AcceptorTest
 
   echo: data :: String on: client :: Object -> Object =>
     (Erlang gen_tcp) send: client with: data
-    ((Erlang gen_tcp)
-      recv: client
-      with: 0
-      with: 5000) unwrap
+    HandlerHarness
+      textOf: (((Erlang gen_tcp)
+        recv: client
+        with: 0
+        with: 5000) unwrap)
 
   /// The acceptor processes, observed through their supervisors (the
   /// acceptors themselves are never called).
