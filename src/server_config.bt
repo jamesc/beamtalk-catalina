@@ -49,11 +49,11 @@ sealed typed Value subclass: ServerConfig
   // Any class conforming to `Transport`; a protocol's class side has no type
   // name, so it is Dynamic.
   field: transport :: Dynamic = TCPTransport
-  field: transportOptions :: List = #()
+  field: transportOptions :: List(Symbol | Tuple) = #()
   field: handler :: Handler class | Nil = nil
   field: handlerOptions :: Object = #()
-  field: genServerOptions :: List = #()
-  field: supervisorOptions :: List = #()
+  field: genServerOptions :: List(Symbol | Tuple) = #()
+  field: supervisorOptions :: List(Symbol | Tuple) = #()
   field: numAcceptors :: Integer = 100
   field: numListenSockets :: Integer = 1
   // `Integer | #infinity` rather than the `Timeout` alias, whose Integer
@@ -71,7 +71,7 @@ sealed typed Value subclass: ServerConfig
   /// `supervisorOptions` that are not a valid Dictionary or a List, more
   /// listen sockets than acceptors, or several listen sockets without
   /// `reuseport` or `reuseport_lb` in `transportOptions`.
-  class sealed fromOptions: options :: Dictionary -> ServerConfig =>
+  class sealed fromOptions: options :: Dictionary(Symbol, Object) -> ServerConfig =>
     self validateKeys: options
     config := self new: (self normaliseOptions: options)
     self validateHandler: config
@@ -87,7 +87,7 @@ sealed typed Value subclass: ServerConfig
   /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
   /// unknown option is a typo the user should hear about, as Elixir's
   /// `struct!/2` reports it.
-  class sealed validateKeys: options :: Dictionary -> Nil =>
+  class sealed validateKeys: options :: Dictionary(Symbol, Object) -> Nil =>
     known := self optionNames
     options keys
       do: [:key |
@@ -104,7 +104,7 @@ sealed typed Value subclass: ServerConfig
     #(#binary, #list, #inet, #inet6, #local)
 
   /// `options` with `transportOptions` and `supervisorOptions` as proplists.
-  class sealed normaliseOptions: options :: Dictionary -> Dictionary =>
+  class sealed normaliseOptions: options :: Dictionary(Symbol, Object) -> Dictionary(Symbol, Object) =>
     #(#transportOptions, #supervisorOptions)
       inject: options
       into: [:acc :name |
@@ -113,7 +113,7 @@ sealed typed Value subclass: ServerConfig
         ] ifFalse: [acc]
       ]
 
-  class sealed proplist: value :: Object named: name :: Symbol -> List =>
+  class sealed proplist: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
     (value isKindOf: List) ifTrue: [^value]
     (value isKindOf: Dictionary)
       ifFalse: [
@@ -130,7 +130,7 @@ sealed typed Value subclass: ServerConfig
 
   /// The proplist entries for one Dictionary entry: none, a bare atom, or
   /// a `{key, value}` pair.
-  class sealed entry: key :: Object value: value :: Object named: name :: Symbol -> List =>
+  class sealed entry: key :: Object value: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
     (key isKindOf: Symbol) ifFalse: [
       Error signal: "{name} keys must be Symbols, got: {key printString}"
     ]

@@ -34,9 +34,9 @@ sealed typed Value subclass: CatalinaTelemetry
   field: spanName :: Symbol = #listener
   field: telemetrySpanContext :: Reference | Nil = nil
   field: startTime :: Integer = 0
-  field: startMetadata :: Dictionary = #{}
+  field: startMetadata :: Dictionary(Symbol, Object) = #{}
   field: handler :: Object = nil
-  field: spanMetadata :: Dictionary = #{}
+  field: spanMetadata :: Dictionary(Symbol, Object) = #{}
 
   /// Native monotonic time, as `telemetry` expects.
   class sealed monotonicTime -> Integer => Erlang erlang monotonic_time
@@ -45,7 +45,7 @@ sealed typed Value subclass: CatalinaTelemetry
   class sealed systemTime -> Integer => Erlang erlang system_time
 
   /// Emit `[catalina, span, name]`.
-  class sealed emit: span :: Symbol name: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+  class sealed emit: span :: Symbol name: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> Nil =>
     Telemetry
       execute: ((#(#catalina) add: span) add: name)
       measurements: measurements
@@ -54,7 +54,7 @@ sealed typed Value subclass: CatalinaTelemetry
   /// Start a span: emit its `start` event and answer it. `measurements`
   /// may supply `#monotonic_time` and `#system_time`; otherwise they are
   /// now. `metadata` should name the `#handler`.
-  class sealed startSpan: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+  class sealed startSpan: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     timed := (measurements includesKey: #monotonic_time) ifTrue: [
       measurements
     ] ifFalse: [measurements at: #monotonic_time put: self monotonicTime]
@@ -79,7 +79,7 @@ sealed typed Value subclass: CatalinaTelemetry
       spanMetadata: #{#telemetry_span_context => context, #handler => handler}
 
   /// Start a child span of this one (`start_child_span/4`).
-  startChild: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+  startChild: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     CatalinaTelemetry
       startSpan: name
       measurements: measurements
@@ -97,13 +97,14 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// Emit `stop` with `#duration`, unless an `exception` already ended the
   /// span in this process. Answers the span, as every event method does.
-  stopWith: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+  stopWith: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     // The marker is in the process dictionary, not in the span or a
     // handler field: `exception` is emitted just before a re-raise, and
     // state written then is lost to `terminate:`, which emits this `stop`.
     // Thousand Island's `exception_marker` works the same way.
     (Erlang erlang erase: self exceptionMarker) =:= true ifTrue: [^self]
-    now := (measurements at: #monotonic_time ifAbsent: [
+    // The `#monotonic_time` measurement is an Integer when present.
+    now :: Integer := (measurements at: #monotonic_time ifAbsent: [
       nil
     ]) ifNil: [CatalinaTelemetry monotonicTime]
     timed := (measurements at: #monotonic_time put: now) at: #duration put: now - self.startTime
@@ -132,7 +133,7 @@ sealed typed Value subclass: CatalinaTelemetry
       metadata: metadata
 
   /// An event that adds `#monotonic_time` (`span_event/4`).
-  event: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+  event: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     timed := (measurements includesKey: #monotonic_time) ifTrue: [
       measurements
     ] ifFalse: [
@@ -145,7 +146,7 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// An event with the span's context and handler in its metadata
   /// (`untimed_span_event/4`).
-  untimedEvent: name :: Symbol measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> CatalinaTelemetry =>
+  untimedEvent: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     CatalinaTelemetry
       emit: self.spanName
       name: name

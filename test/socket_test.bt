@@ -239,11 +239,11 @@ TestCase subclass: SocketTest
     client := self connect
     config := (HandlerConfig new withTransport: LegacyTransport) withHandshakeTimeout: 250
     sock := (self acceptWith: config) handshake unwrap
-    @expect dnu
-    self assert: (sock socket at: 1) equals: #legacy
+    // LegacyTransport tags its sockets: `{#legacy, port}`.
+    tagged :: Tuple := sock socket
+    self assert: (tagged at: 1) equals: #legacy
     // Unwrap the tag and echo through the legacy transport.
-    @expect dnu
-    sock := sock withSocket: (sock socket at: 2)
+    sock := sock withSocket: (tagged at: 2)
     (Erlang gen_tcp) send: client with: "HELLO"
     sock send: sock recv unwrap
     self assert: ((Erlang gen_tcp) recv: client with: 0) unwrap equals: "HELLO"
@@ -278,7 +278,7 @@ TestCase subclass: SocketTest
       silentTerminateOnError: false
     // The raw socket is never touched, so it can be anything.
     sock := Socket
-      wrap: #unused
+      wrap: {#unused}
       peername: {{1, 2, 3, 4}, 5}
       handlerConfig: config
       span: nil

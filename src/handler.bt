@@ -173,7 +173,7 @@ typed Server subclass: Handler
       _ -> self handleUserInfo: msg
     ]
 
-  onReady: raw :: Object config: config :: HandlerConfig span: acceptorSpan :: CatalinaTelemetry | Nil start: start :: Integer -> Nil =>
+  onReady: raw :: Port | Tuple config: config :: HandlerConfig span: acceptorSpan :: CatalinaTelemetry | Nil start: start :: Integer -> Nil =>
     self stopWatchingAcceptor
     transport := config transport
     peer := transport peername: raw
@@ -252,7 +252,7 @@ typed Server subclass: Handler
 
   // A socket message for another socket, or one before the ready message,
   // goes to `handleUserInfo:`.
-  onData: data :: Object from: raw :: Object message: msg :: Object -> Object =>
+  onData: data :: Object from: raw :: Port | Tuple message: msg :: Object -> Object =>
     (self hasField: #socket)
       ifTrue: [
         sock := self.socket
@@ -270,7 +270,7 @@ typed Server subclass: Handler
       ]
     self handleUserInfo: msg
 
-  onClosed: raw :: Object message: msg :: Object -> Object =>
+  onClosed: raw :: Port | Tuple message: msg :: Object -> Object =>
     (self hasField: #socket) ifTrue: [
       raw =:= self.socket socket ifTrue: [
         ^self stopWith: {#shutdown, #peer_closed}
@@ -278,7 +278,7 @@ typed Server subclass: Handler
     ]
     self handleUserInfo: msg
 
-  onSocketError: reason :: Object from: raw :: Object message: msg :: Object -> Object =>
+  onSocketError: reason :: Object from: raw :: Port | Tuple message: msg :: Object -> Object =>
     (self hasField: #socket) ifTrue: [
       raw =:= self.socket socket ifTrue: [^self stopWith: reason]
     ]
@@ -499,7 +499,7 @@ typed Server subclass: Handler
 
   /// The `send_oct`, `send_cnt`, `recv_oct` and `recv_cnt` of a `getstat`
   /// answer.
-  counters: stats :: List -> Dictionary =>
+  counters: stats :: List(Tuple) -> Dictionary(Symbol, Integer) =>
     result := #{}
     #(#send_oct, #send_cnt, #recv_oct, #recv_cnt)
       do: [:key |

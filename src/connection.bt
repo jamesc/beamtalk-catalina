@@ -32,7 +32,7 @@
 /// ```
 sealed typed Object subclass: Connection
 
-  class sealed start: rawSocket :: Object connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Result =>
+  class sealed start: rawSocket :: Port | Tuple connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Result(Nil, Object) =>
     startTime := CatalinaTelemetry monotonicTime
     transport := handlerConfig transport
     started := self
@@ -64,7 +64,7 @@ sealed typed Object subclass: Connection
     Result ok: nil
 
   /// `startChild:`, retried while the supervisor is full.
-  class sealed startChildOn: connections :: ConnectionSupervisor args: args :: Dictionary retries: retries :: Integer wait: wait :: Integer -> Result =>
+  class sealed startChildOn: connections :: ConnectionSupervisor args: args :: Dictionary(Symbol, Object) retries: retries :: Integer wait: wait :: Integer -> Result(Handler, Error) =>
     result := connections startChild: args
     remaining := retries
     // `isError` first: the common, successful start then skips the error
