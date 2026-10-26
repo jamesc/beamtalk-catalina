@@ -25,7 +25,7 @@
 sealed typed Object subclass: TCPTransport
 
   /// Open a listen socket with the resolved options.
-  class sealed listen: port :: Integer options: userOptions :: List -> Result =>
+  class sealed listen: port :: Integer options: userOptions :: List -> Result(Port | Tuple, Object) =>
     TransportResult bare: ((Erlang gen_tcp) listen: port with: (self listenOptions: userOptions))
 
   /// The options `listen:options:` passes to `gen_tcp:listen/2`: the
@@ -42,26 +42,27 @@ sealed typed Object subclass: TCPTransport
       ])
 
   /// Block until a client connects. The accepted socket is passive.
-  class sealed accept: listenSocket :: Object -> Result =>
+  class sealed accept: listenSocket :: Object -> Result(Port | Tuple, Object) =>
     TransportResult bare: ((Erlang gen_tcp) accept: listenSocket)
 
   /// Clear TCP has no handshake.
-  class sealed handshake: socket :: Object -> Result => Result ok: socket
+  class sealed handshake: socket :: Object -> Result(Port | Tuple, Object) =>
+    Result ok: socket
 
   /// Clear TCP has no handshake, so the timeout is not used.
-  class sealed handshake: socket :: Object timeout: _timeout :: Object -> Result =>
+  class sealed handshake: socket :: Object timeout: _timeout :: Object -> Result(Port | Tuple, Object) =>
     Result ok: socket
 
   /// Clear TCP cannot be upgraded.
-  class sealed upgrade: _socket :: Object options: _options :: Object -> Result =>
+  class sealed upgrade: _socket :: Object options: _options :: Object -> Result(Port | Tuple, Object) =>
     Result error: #unsupported_upgrade
 
   /// Make `pid` the socket's owner.
-  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
+  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang gen_tcp) controlling_process: socket with: pid)
 
   /// Read up to `length` bytes (0: whatever is available).
-  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
+  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result(Binary, Object) =>
     TransportResult
       bare: ((Erlang gen_tcp)
         recv: socket
@@ -69,11 +70,11 @@ sealed typed Object subclass: TCPTransport
         with: timeout)
 
   /// Send a String or iodata.
-  class sealed send: socket :: Object data: data :: Object -> Result =>
+  class sealed send: socket :: Object data: data :: Object -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang gen_tcp) send: socket with: data)
 
   /// Send part of a file with `file:sendfile/5`, closing the file afterwards.
-  class sealed sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result =>
+  class sealed sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
     opened := TransportResult bare: ((Erlang file) open: filename with: #(#read, #raw, #binary))
     opened isError ifTrue: [^opened]
     fd := opened value
@@ -88,44 +89,44 @@ sealed typed Object subclass: TCPTransport
     ] ensure: [(Erlang file) close: fd]
 
   /// Read socket options (`inet:getopts/2`).
-  class sealed getopts: socket :: Object options: options :: List -> Result =>
+  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List, Object) =>
     TransportResult bare: ((Erlang inet) getopts: socket with: options)
 
   /// Set socket options (`inet:setopts/2`).
-  class sealed setopts: socket :: Object options: options :: List -> Result =>
+  class sealed setopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang inet) setopts: socket with: options)
 
   /// Shut the connection down in one direction.
-  class sealed shutdown: socket :: Object how: way :: Symbol -> Result =>
+  class sealed shutdown: socket :: Object how: way :: Symbol -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang gen_tcp) shutdown: socket with: way)
 
   /// Close a connection or listen socket.
-  class sealed close: socket :: Object -> Result =>
+  class sealed close: socket :: Object -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang gen_tcp) close: socket)
 
   /// The local `{ip, port}`.
-  class sealed sockname: socket :: Object -> Result =>
+  class sealed sockname: socket :: Object -> Result(Tuple, Object) =>
     TransportResult bare: ((Erlang inet) sockname: socket)
 
   /// The remote `{ip, port}`.
-  class sealed peername: socket :: Object -> Result =>
+  class sealed peername: socket :: Object -> Result(Tuple, Object) =>
     TransportResult bare: ((Erlang inet) peername: socket)
 
   /// Clear TCP has no peer certificate.
-  class sealed peercert: _socket :: Object -> Result =>
+  class sealed peercert: _socket :: Object -> Result(Binary, Object) =>
     Result error: #not_secure
 
   /// Clear TCP is not secure.
   class sealed isSecure -> Boolean => false
 
   /// The socket's `inet:getstat/1` counters.
-  class sealed getstat: socket :: Object -> Result =>
+  class sealed getstat: socket :: Object -> Result(List(Tuple), Object) =>
     TransportResult bare: ((Erlang inet) getstat: socket)
 
   /// Clear TCP negotiates no protocol.
-  class sealed negotiatedProtocol: _socket :: Object -> Result =>
+  class sealed negotiatedProtocol: _socket :: Object -> Result(Binary, Object) =>
     Result error: #protocol_not_negotiated
 
   /// Clear TCP has no TLS connection information.
-  class sealed connectionInformation: _socket :: Object -> Result =>
+  class sealed connectionInformation: _socket :: Object -> Result(List, Object) =>
     Result error: #not_secure

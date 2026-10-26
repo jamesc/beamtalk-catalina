@@ -39,7 +39,7 @@ sealed typed Value subclass: Socket
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
-  class sealed wrap: rawSocket :: Object peername: peer :: Object handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
+  class sealed wrap: rawSocket :: Object peername: peer :: Tuple | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
     Socket
       socket: rawSocket
       transport: handlerConfig transport
@@ -53,7 +53,7 @@ sealed typed Value subclass: Socket
   /// transport answers `handshake:timeout:`, and answer the Socket over the
   /// handshaken socket. On failure the span is left to the handler, which
   /// stops it once when it closes the connection.
-  handshake -> Result =>
+  handshake -> Result(Socket, Object) =>
     result := (self.transport respondsTo: #handshake:timeout:) ifTrue: [
       self.transport handshake: self.socket timeout: self.handshakeTimeout
     ] ifFalse: [self.transport handshake: self.socket]
@@ -62,20 +62,21 @@ sealed typed Value subclass: Socket
   /// Upgrade the connection to `newTransport` (for example to TLS) and
   /// answer the Socket over the upgraded socket. `options` go to the new
   /// transport unchanged.
-  upgrade: newTransport :: Dynamic options: options :: Object -> Result =>
+  upgrade: newTransport :: Dynamic options: options :: Object -> Result(Socket, Object) =>
     (newTransport upgrade: self.socket options: options) map: [:inner |
       (self withSocket: inner) withTransport: newTransport
     ]
 
   /// The next available bytes, waiting at most `readTimeout`.
-  recv -> Result => self recv: 0
+  recv -> Result(Binary, Object) => self recv: 0
 
   /// Up to `length` bytes (0: the next available), waiting at most `readTimeout`.
-  recv: length :: Integer -> Result => self recv: length timeout: nil
+  recv: length :: Integer -> Result(Binary, Object) =>
+    self recv: length timeout: nil
 
   /// Up to `length` bytes, waiting at most `timeout` ms (`nil`: `readTimeout`).
   /// Emits `recv` (`#data`) or `recv_error` (`#error`).
-  recv: length :: Integer timeout: timeout :: Object -> Result =>
+  recv: length :: Integer timeout: timeout :: Object -> Result(Binary, Object) =>
     result := self.transport
       recv: self.socket
       length: length
@@ -87,7 +88,7 @@ sealed typed Value subclass: Socket
 
   /// Send a String or iodata. Emits `send` (`#data`) or `send_error`
   /// (`#data`, `#error`).
-  send: data :: Object -> Result =>
+  send: data :: Object -> Result(Nil, Object) =>
     result := self.transport send: self.socket data: data
     result isOk ifTrue: [
       self untimed: #send measurements: #{#data => data}
@@ -102,7 +103,7 @@ sealed typed Value subclass: Socket
   /// Send `length` bytes of the file at `filename` from `offset` (0: to the
   /// end). Emits `sendfile` (`#filename`, `#offset`, `#bytes_written`) or
   /// `sendfile_error` (`#filename`, `#offset`, `#length`, `#error`).
-  sendfile: filename :: String offset: offset :: Integer length: length :: Integer -> Result =>
+  sendfile: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
     result := self.transport
       sendfile: self.socket
       filename: filename
@@ -130,41 +131,42 @@ sealed typed Value subclass: Socket
 
   /// Shut the connection down in one direction: `#read`, `#write` or
   /// `#read_write`. Emits `socket_shutdown` (`#way`).
-  shutdown: way :: Symbol -> Result =>
+  shutdown: way :: Symbol -> Result(Nil, Object) =>
     self event: #socket_shutdown measurements: #{#way => way}
     self.transport shutdown: self.socket how: way
 
   /// Close the connection. The handler that owns it also closes it when it exits.
-  close -> Result => self.transport close: self.socket
+  close -> Result(Nil, Object) => self.transport close: self.socket
 
   /// Read socket options.
-  getopts: options :: List -> Result =>
+  getopts: options :: List(Symbol | Tuple) -> Result(List, Object) =>
     self.transport getopts: self.socket options: options
 
   /// Set socket options.
-  setopts: options :: List -> Result =>
+  setopts: options :: List(Symbol | Tuple) -> Result(Nil, Object) =>
     self.transport setopts: self.socket options: options
 
   /// The local `{ip, port}`.
-  sockname -> Result => self.transport sockname: self.socket
+  sockname -> Result(Tuple, Object) => self.transport sockname: self.socket
 
   /// The remote `{ip, port}` captured at accept time. Always `Result ok:`.
-  peername -> Result => Result ok: self.peername
+  peername -> Result(Tuple | Nil, Object) => Result ok: self.peername
 
   /// The peer's DER certificate, or `Result error: #not_secure`.
-  peercert -> Result => self.transport peercert: self.socket
+  peercert -> Result(Binary, Object) => self.transport peercert: self.socket
 
   /// Whether the transport is encrypted.
   isSecure -> Boolean => self.transport isSecure
 
   /// The socket's `inet:getstat/1` counters.
-  getstat -> Result => self.transport getstat: self.socket
+  getstat -> Result(List(Tuple), Object) => self.transport getstat: self.socket
 
   /// The protocol negotiated in the handshake (ALPN), if any.
-  negotiatedProtocol -> Result => self.transport negotiatedProtocol: self.socket
+  negotiatedProtocol -> Result(Binary, Object) =>
+    self.transport negotiatedProtocol: self.socket
 
   /// The TLS connection information, or `Result error: #not_secure`.
-  connectionInformation -> Result =>
+  connectionInformation -> Result(List, Object) =>
     self.transport connectionInformation: self.socket
 
   /// The telemetry span covering this connection (nil outside a server).
