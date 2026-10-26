@@ -113,7 +113,7 @@ typed Supervisor subclass: ServerSupervisor
   /// `#activeConnections`. It walks the tree, so call it at human
   /// timescales. Draining at deploy time is `suspend`, then polling `info`
   /// until `#activeConnections` is 0.
-  info -> Dictionary =>
+  info -> Dictionary(Symbol, Object) =>
     local := self listenerInfo
     #{
       #status => self status,

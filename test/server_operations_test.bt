@@ -238,7 +238,8 @@ TestCase subclass: ServerOperationsTest
     srv := self server
     info := srv info
     self assert: (info at: #status) equals: #running
-    self assert: ((info at: #localInfo) at: 2) equals: port
+    local :: Tuple := info at: #localInfo
+    self assert: (local at: 2) equals: port
     self assert: (info at: #activeConnections) equals: 0
     client := self connect: port
     other := self connect: port

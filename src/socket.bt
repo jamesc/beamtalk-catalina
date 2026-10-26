@@ -27,7 +27,7 @@
 /// ```
 sealed typed Value subclass: Socket
   // The raw socket: a gen_tcp port, or an ssl socket record (Phase 4).
-  field: socket :: Object = nil
+  field: socket :: Port | Tuple
   // A class conforming to `Transport` (see `ServerConfig`).
   field: transport :: Dynamic = TCPTransport
   field: readTimeout :: Integer | #infinity = 60000
@@ -39,7 +39,7 @@ sealed typed Value subclass: Socket
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
-  class sealed wrap: rawSocket :: Object peername: peer :: Tuple | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
+  class sealed wrap: rawSocket :: Port | Tuple peername: peer :: Tuple | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
     Socket
       socket: rawSocket
       transport: handlerConfig transport
@@ -173,7 +173,7 @@ sealed typed Value subclass: Socket
   telemetrySpan -> CatalinaTelemetry | Nil => self.span
 
   /// An event on the connection span, with the time (`span_event/4`).
-  event: name :: Symbol measurements: measurements :: Dictionary -> Socket =>
+  event: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) -> Socket =>
     span := self.span
     span isNil
       ifFalse: [
@@ -186,7 +186,7 @@ sealed typed Value subclass: Socket
 
   /// An event on the connection span, without the time
   /// (`untimed_span_event/4`).
-  untimed: name :: Symbol measurements: measurements :: Dictionary -> Socket =>
+  untimed: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) -> Socket =>
     span := self.span
     span isNil
       ifFalse: [

@@ -106,7 +106,7 @@ typed Server subclass: Acceptor
       ]
     nil
 
-  onAccepted: rawSocket :: Object -> Nil =>
+  onAccepted: rawSocket :: Port | Tuple -> Nil =>
     self.count := self.count + 1
     started := Connection
       start: rawSocket
