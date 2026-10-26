@@ -100,3 +100,12 @@ sealed typed Object subclass: HandlerHarness
       length: 0
       timeout: ms
     result isOk ifTrue: [result value] ifFalse: [result error]
+
+  /// Socket bytes as text (BT-4172): the fixtures' data is trusted ASCII
+  /// from the tests, so unchecked conversion is exact — and it stays a
+  /// String across the BT-4170 flip, where `text :: String := data`
+  /// would fail on Binary data.
+  class sealed textOf: data :: Object -> String =>
+    (data isKindOf: String) ifTrue: [^data]
+    (data isKindOf: Binary) ifTrue: [^data asStringUnchecked]
+    Error signal: ("expected socket bytes, got: " ++ data printString)

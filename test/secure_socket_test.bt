@@ -74,11 +74,11 @@ TestCase subclass: SecureSocketTest
     port := self start: SendfileOnConnect
     client := self connect: port
     received := ""
-    [received size < 9]
+    [received byteSize < 9]
       whileTrue: [
         chunk := self recv: client
-        (chunk isKindOf: String) ifTrue: [
-          received := received ++ chunk
+        (chunk isKindOf: Binary) ifTrue: [
+          received := received ++ (HandlerHarness textOf: chunk)
         ] ifFalse: [^self fail: "closed early"]
       ]
     self assert: received equals: "ABCDEFBCD"
@@ -100,13 +100,23 @@ TestCase subclass: SecureSocketTest
     [done]
       whileFalse: [
         chunk := self recv: client
-        (chunk isKindOf: String) ifTrue: [
-          received := received + chunk size
+        (chunk isKindOf: Binary) ifTrue: [
+          received := received + chunk byteSize
         ] ifFalse: [done := true]
       ]
     self assert: received equals: size
     self assert: (self awaitLogged: {#sent, Result ok: size})
     File delete: path
+
+  // BT-4172: the socket-bytes-to-text conversion the fixtures share.
+  testTextOfConvertsSocketBytes =>
+    self assert: (HandlerHarness textOf: "ping") equals: "ping"
+    text := HandlerHarness textOf: (Binary fromBytes: #(112, 105, 110, 103))
+    self assert: text equals: "ping"
+    self assert: (text isKindOf: String)
+    failed := Result tryDo: [HandlerHarness textOf: #closed]
+    self assert: failed isError
+    self assert: (failed error message includesSubstring: "socket bytes")
 
   testClosesStalledHandshakesOnceHandshakeTimeoutHasElapsed =>
     port := self start: RecordingHandler options: #{#handshakeTimeout => 500}

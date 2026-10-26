@@ -7,7 +7,7 @@
 RecordingHandler subclass: PersistentWithLocal
 
   handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
-    text :: String := data
+    text := HandlerHarness textOf: data
     self scheduleLocal
     (text startsWith: "start") ifTrue: [
       HandlerResult continue: st persistentTimeout: 80

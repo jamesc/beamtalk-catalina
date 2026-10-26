@@ -10,7 +10,7 @@ sealed typed Object subclass: UpperProtocol
     HandlerResult continue: st
 
   class sealed handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
-    text :: String := data
+    text := HandlerHarness textOf: data
     options :: Dictionary := st
     (text startsWith: "switch")
       ifTrue: [

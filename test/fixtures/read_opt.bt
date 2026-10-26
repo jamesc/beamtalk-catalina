@@ -6,7 +6,7 @@
 RecordingHandler subclass: ReadOpt
 
   handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
-    text :: String := data
+    text := HandlerHarness textOf: data
     // A test fixture: the option names come from a fixed set in the tests.
     self note: {#opt, sock getopts: (#() add: text asAtom)}
     sock send: "ok"
