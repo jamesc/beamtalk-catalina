@@ -81,7 +81,7 @@ sealed typed Object subclass: HandlerHarness
       handshaken: ((Erlang ssl)
         connect: {127, 0, 0, 1}
         with: port
-        with: self tlsClientOptions ++ extra
+        with: (TransportOptions unwrapStrings: (self tlsClientOptions ++ extra))
         with: 5000)
 
   /// Start TLS on an already connected clear-TCP client socket.
@@ -90,7 +90,7 @@ sealed typed Object subclass: HandlerHarness
     SSLTransport
       handshaken: ((Erlang ssl)
         connect: tcpSocket
-        with: self tlsClientOptions
+        with: (TransportOptions unwrapStrings: self tlsClientOptions)
         with: 5000)
 
   /// The next data on a TLS client within `ms`, or the bare error.
@@ -99,7 +99,7 @@ sealed typed Object subclass: HandlerHarness
       recv: client
       length: 0
       timeout: ms
-    result isOk ifTrue: [result value] ifFalse: [result error]
+    result isOk ifTrue: [self textOf: result value] ifFalse: [result error]
 
   /// Socket bytes as text (BT-4172): the fixtures' data is trusted ASCII
   /// from the tests, so unchecked conversion is exact — and it stays a

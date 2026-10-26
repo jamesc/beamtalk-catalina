@@ -55,7 +55,7 @@ TestCase subclass: SocketTest
     self assert: ((Erlang gen_tcp) send: client with: "HELLO") isOk
     data := sock recv unwrap
     sock send: data
-    self assert: ((Erlang gen_tcp) recv: client with: 0) unwrap equals: "HELLO"
+    self assert: (HandlerHarness textOf: (((Erlang gen_tcp) recv: client with: 0) unwrap)) equals: "HELLO"
     sock close
     (Erlang gen_tcp) close: client
 
@@ -101,7 +101,7 @@ TestCase subclass: SocketTest
         offset: 1
         length: 3) unwrap
       equals: 3
-    self assert: ((Erlang gen_tcp) recv: client with: 9) unwrap equals: "ABCDEFBCD"
+    self assert: (HandlerHarness textOf: (((Erlang gen_tcp) recv: client with: 9) unwrap)) equals: "ABCDEFBCD"
     // The file is closed again, so it no longer monitors us.
     self assert: self fileMonitors equals: before
     sock close
@@ -135,7 +135,7 @@ TestCase subclass: SocketTest
           with: 0
           with: 5000
         chunk isOk ifTrue: [
-          received := received + chunk value byteSize
+          received := received + chunk value size
         ] ifFalse: [done := true]
       ]
     self assert: received equals: size
@@ -170,8 +170,8 @@ TestCase subclass: SocketTest
     client := self connect
     sock := self accept
     (Erlang gen_tcp) send: client with: "HELLOWORLD"
-    self assert: (sock recv: 5) unwrap equals: "HELLO"
-    self assert: (sock recv: 5) unwrap equals: "WORLD"
+    self assert: (HandlerHarness textOf: ((sock recv: 5) unwrap)) equals: "HELLO"
+    self assert: (HandlerHarness textOf: ((sock recv: 5) unwrap)) equals: "WORLD"
     sock close
     (Erlang gen_tcp) close: client
 
@@ -246,7 +246,7 @@ TestCase subclass: SocketTest
     sock := sock withSocket: (tagged at: 2)
     (Erlang gen_tcp) send: client with: "HELLO"
     sock send: sock recv unwrap
-    self assert: ((Erlang gen_tcp) recv: client with: 0) unwrap equals: "HELLO"
+    self assert: (HandlerHarness textOf: (((Erlang gen_tcp) recv: client with: 0) unwrap)) equals: "HELLO"
     sock close
     (Erlang gen_tcp) close: client
 

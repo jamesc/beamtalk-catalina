@@ -73,16 +73,17 @@ TestCase subclass: TransportOptionsTest
   testListensOnAUnixDomainSocket =>
     ls := (TCPTransport listen: 0 options: #({#ip, {#local, self.path}})) unwrap
     client := ((Erlang gen_tcp)
-      connect: {#local, self.path}
+      connect: {#local, (Binary fromIolist: self.path)}
       with: 0
       with: #(#binary, {#active, false})) unwrap
     server := (TCPTransport accept: ls) unwrap
     (Erlang gen_tcp) send: client with: "hi"
     self
-      assert: (TCPTransport
-        recv: server
-        length: 0
-        timeout: 1000) unwrap
+      assert: (HandlerHarness
+        textOf: ((TCPTransport
+          recv: server
+          length: 0
+          timeout: 1000) unwrap))
       equals: "hi"
     (Erlang gen_tcp) close: client
     TCPTransport close: server

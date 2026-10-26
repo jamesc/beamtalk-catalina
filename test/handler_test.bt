@@ -46,7 +46,9 @@ TestCase subclass: HandlerTest
       recv: client
       length: 0
       timeout: ms
-    result isOk ifTrue: [result value] ifFalse: [result error]
+    result isOk ifTrue: [
+      HandlerHarness textOf: result value
+    ] ifFalse: [result error]
 
   // Generous, as the machine may be loaded; it only waits when nothing comes.
   recv: client :: Object -> Object => self recv: client within: 3000
@@ -310,7 +312,7 @@ TestCase subclass: HandlerTest
           length: 0
           timeout: 1000
         chunk isOk ifTrue: [
-          received := received + chunk value byteSize
+          received := received + chunk value size
         ] ifFalse: [done := true]
       ]
     // About one byte per millisecond until the 500 ms read timeout closes

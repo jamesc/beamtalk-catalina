@@ -52,7 +52,9 @@ TestCase subclass: ServerOperationsTest
       recv: client
       length: 0
       timeout: ms
-    result isOk ifTrue: [result value] ifFalse: [result error]
+    result isOk ifTrue: [
+      HandlerHarness textOf: result value
+    ] ifFalse: [result error]
 
   recv: client :: Object -> Object => self recv: client within: 3000
 
@@ -314,7 +316,7 @@ TestCase subclass: ServerOperationsTest
       #transportOptions => #({#ip, {#local, path}})
     }
     client := ((Erlang gen_tcp)
-      connect: {#local, path}
+      connect: {#local, (Binary fromIolist: path)}
       with: 0
       with: #(#binary, {#active, false})
       with: 1000) unwrap

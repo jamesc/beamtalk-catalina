@@ -42,7 +42,9 @@ TestCase subclass: TelemetryTest
       recv: client
       length: 0
       timeout: 3000
-    result isOk ifTrue: [result value] ifFalse: [result error]
+    result isOk ifTrue: [
+      HandlerHarness textOf: result value
+    ] ifFalse: [result error]
 
   /// The first `span` `suffix` event, waiting up to three seconds.
   await: span :: Symbol named: suffix :: Symbol -> Tuple | Nil =>
@@ -166,11 +168,11 @@ TestCase subclass: TelemetryTest
     (Erlang gen_tcp) send: client with: "HELLO"
     self assert: (self recv: client) equals: "HELLO"
     recv := self await: #connection named: #recv
-    self assert: ((self measurementsOf: recv) at: #data) equals: "HELLO"
+    self assert: (HandlerHarness textOf: ((self measurementsOf: recv) at: #data)) equals: "HELLO"
     self assert: ((self metadataOf: recv) at: #handler) equals: TelemetryBlockingEcho
     self assert: (self isReference: ((self metadataOf: recv) at: #telemetry_span_context))
     send := self await: #connection named: #send
-    self assert: ((self measurementsOf: send) at: #data) equals: "HELLO"
+    self assert: (HandlerHarness textOf: ((self measurementsOf: send) at: #data)) equals: "HELLO"
 
   testExactlyOneConnectionStartAndStop =>
     port := self start: TelemetryBlockingEcho
@@ -207,7 +209,7 @@ TestCase subclass: TelemetryTest
     client := self connect: port
     (Erlang gen_tcp) send: client with: "ping"
     event := self await: #connection named: #async_recv
-    self assert: ((self measurementsOf: event) at: #data) equals: "ping"
+    self assert: (HandlerHarness textOf: ((self measurementsOf: event) at: #data)) equals: "ping"
 
   testStopEventOnClientShutdown =>
     port := self start: TelemetryHello

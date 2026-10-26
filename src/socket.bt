@@ -162,7 +162,7 @@ sealed typed Value subclass: Socket
   getstat -> Result(List(Tuple), Object) => self.transport getstat: self.socket
 
   /// The protocol negotiated in the handshake (ALPN), if any.
-  negotiatedProtocol -> Result(Binary, Object) =>
+  negotiatedProtocol -> Result(String, Object) =>
     self.transport negotiatedProtocol: self.socket
 
   /// The TLS connection information, or `Result error: #not_secure`.

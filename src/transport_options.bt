@@ -33,6 +33,20 @@ sealed typed Object subclass: TransportOptions
   class sealed defaultOptions -> List(Object) =>
     #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 
+  // Untyped FFI by design: `deep_unwrap_strings/1` has no stub, and its
+  // return shape mirrors the input.
+
+  /// Deep-unwrap nested Strings to bytes for stock Erlang calls (BT-4173).
+  ///
+  /// The FFI proxy unwraps only top-level `String` args; option trees
+  /// (`{#certfile, path}`, `{#local, path}`, ...) carry Strings nested
+  /// inside tuples/lists, which `ssl`/`gen_tcp` reject. Run the options
+  /// through here at the FFI call site. Anything that is not a String
+  /// passes through untouched.
+  @expect type
+  class sealed unwrapStrings: options :: List(Object) -> List(Object) =>
+    (Erlang beamtalk_primitive) deep_unwrap_strings: options
+
   /// Required, then user, then default options, first one per key wins.
   class sealed resolveOptions: userOptions :: List(Object) -> List(Object) =>
     all := self requiredOptions

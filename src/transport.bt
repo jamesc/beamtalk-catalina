@@ -90,7 +90,7 @@ Protocol define: Transport
   class getstat: socket :: Object -> Result(List(Tuple), Object)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
-  class negotiatedProtocol: socket :: Object -> Result(Binary, Object)
+  class negotiatedProtocol: socket :: Object -> Result(String, Object)
 
   /// The TLS connection information, or `Result error: #not_secure`.
   class connectionInformation: socket :: Object -> Result(List, Object)

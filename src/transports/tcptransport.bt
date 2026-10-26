@@ -26,7 +26,7 @@ sealed typed Object subclass: TCPTransport
 
   /// Open a listen socket with the resolved options.
   class sealed listen: port :: Integer options: userOptions :: List -> Result(Port | Tuple, Object) =>
-    TransportResult bare: ((Erlang gen_tcp) listen: port with: (self listenOptions: userOptions))
+    TransportResult bare: ((Erlang gen_tcp) listen: port with: (TransportOptions unwrapStrings: (self listenOptions: userOptions)))
 
   /// The options `listen:options:` passes to `gen_tcp:listen/2`: the
   /// resolved options with `inet_backend`, which must come first, moved to
@@ -124,7 +124,7 @@ sealed typed Object subclass: TCPTransport
     TransportResult bare: ((Erlang inet) getstat: socket)
 
   /// Clear TCP negotiates no protocol.
-  class sealed negotiatedProtocol: _socket :: Object -> Result(Binary, Object) =>
+  class sealed negotiatedProtocol: _socket :: Object -> Result(String, Object) =>
     Result error: #protocol_not_negotiated
 
   /// Clear TCP has no TLS connection information.
