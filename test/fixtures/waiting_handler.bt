@@ -7,6 +7,9 @@
 typed Server subclass: WaitingHandler
   // The name of the Ets table to record in (the start args).
   state: handlerOptions :: Symbol
+  // The acceptor's pid (the start args): `Connection` always passes it, and
+  // start args naming an undeclared field are rejected.
+  state: acceptor :: Pid | Nil = nil
 
   initialize -> Nil => self record: #started value: self pid
 
