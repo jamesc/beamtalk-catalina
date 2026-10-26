@@ -14,5 +14,5 @@
 sealed typed Object subclass: TransportResult
 
   /// `result` with an Exception error replaced by its `reason`.
-  class sealed bare: result :: Result(Object, Exception) -> Result(Object, Object) =>
+  class sealed bare: result :: Result(V, Exception) -> Result(V, Object) =>
     result mapError: [:e | e reason]

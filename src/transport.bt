@@ -36,61 +36,61 @@
 /// ```
 Protocol define: Transport
   /// Open a listen socket on `port` (0 for an ephemeral port).
-  class listen: port :: Integer options: options :: List -> Result
+  class listen: port :: Integer options: options :: List -> Result(Port | Tuple, Object)
 
   /// Wait for a connection on a listen socket.
-  class accept: listenSocket :: Object -> Result
+  class accept: listenSocket :: Object -> Result(Port | Tuple, Object)
 
   /// Complete the transport's handshake on a new connection (TLS); a clear
   /// transport answers the socket unchanged.
-  class handshake: socket :: Object -> Result
+  class handshake: socket :: Object -> Result(Port | Tuple, Object)
 
   /// Upgrade an established connection (STARTTLS-style), or answer
   /// `Result error: #unsupported_upgrade`.
-  class upgrade: socket :: Object options: options :: Object -> Result
+  class upgrade: socket :: Object options: options :: Object -> Result(Port | Tuple, Object)
 
   /// Hand the socket to `pid`. Only its current owner may call this.
-  class controllingProcess: socket :: Object pid: pid :: Pid -> Result
+  class controllingProcess: socket :: Object pid: pid :: Pid -> Result(Nil, Object)
 
   /// Read up to `length` bytes (0: whatever is available), waiting at most
   /// `timeout` ms (or `#infinity`).
-  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result
+  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result(Binary, Object)
 
   /// Send a String or iodata.
-  class send: socket :: Object data: data :: Object -> Result
+  class send: socket :: Object data: data :: Object -> Result(Nil, Object)
 
   /// Send `length` bytes of a file from `offset` (0 for the rest of it).
-  class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result
+  class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object)
 
   /// Read socket options.
-  class getopts: socket :: Object options: options :: List -> Result
+  class getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List, Object)
 
   /// Set socket options.
-  class setopts: socket :: Object options: options :: List -> Result
+  class setopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(Nil, Object)
 
   /// Shut the connection down in one direction: `#read`, `#write` or `#read_write`.
-  class shutdown: socket :: Object how: way :: Symbol -> Result
+  class shutdown: socket :: Object how: way :: Symbol -> Result(Nil, Object)
 
   /// Close a connection or listen socket.
-  class close: socket :: Object -> Result
+  class close: socket :: Object -> Result(Nil, Object)
 
   /// The local `{ip, port}` of a connection or listen socket.
-  class sockname: socket :: Object -> Result
+  class sockname: socket :: Object -> Result(Tuple, Object)
 
   /// The remote `{ip, port}` of a connection.
-  class peername: socket :: Object -> Result
+  class peername: socket :: Object -> Result(Tuple, Object)
 
   /// The peer's DER certificate, or `Result error: #not_secure`.
-  class peercert: socket :: Object -> Result
+  class peercert: socket :: Object -> Result(Binary, Object)
 
   /// Whether this transport is encrypted.
   class isSecure -> Boolean
 
   /// The socket's `inet:getstat/1` counters.
-  class getstat: socket :: Object -> Result
+  class getstat: socket :: Object -> Result(List(Tuple), Object)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
-  class negotiatedProtocol: socket :: Object -> Result
+  class negotiatedProtocol: socket :: Object -> Result(Binary, Object)
 
   /// The TLS connection information, or `Result error: #not_secure`.
-  class connectionInformation: socket :: Object -> Result
+  class connectionInformation: socket :: Object -> Result(List, Object)

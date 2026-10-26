@@ -239,8 +239,10 @@ TestCase subclass: SocketTest
     client := self connect
     config := (HandlerConfig new withTransport: LegacyTransport) withHandshakeTimeout: 250
     sock := (self acceptWith: config) handshake unwrap
+    @expect dnu
     self assert: (sock socket at: 1) equals: #legacy
     // Unwrap the tag and echo through the legacy transport.
+    @expect dnu
     sock := sock withSocket: (sock socket at: 2)
     (Erlang gen_tcp) send: client with: "HELLO"
     sock send: sock recv unwrap
