@@ -6,7 +6,7 @@
 RecordingHandler subclass: OneShotWithLocal
 
   handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
-    text :: String := data
+    text := HandlerHarness textOf: data
     (text startsWith: "start")
       ifTrue: [
         self scheduleLocal

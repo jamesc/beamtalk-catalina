@@ -148,7 +148,7 @@ sealed typed Object subclass: SSLTransport
                 done := true
               ]
               ifFalse: [
-                data :: String := read value
+                data :: Binary := read value
                 written := TransportResult bare: ((Erlang ssl) send: socket with: data)
                 written isError
                   ifTrue: [
@@ -156,7 +156,7 @@ sealed typed Object subclass: SSLTransport
                     done := true
                   ]
                   ifFalse: [
-                    sent := sent + data size
+                    sent := sent + data byteSize
                     done := length > 0 and: [sent >= length]
                   ]
               ]

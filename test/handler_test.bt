@@ -310,7 +310,7 @@ TestCase subclass: HandlerTest
           length: 0
           timeout: 1000
         chunk isOk ifTrue: [
-          received := received + chunk value size
+          received := received + chunk value byteSize
         ] ifFalse: [done := true]
       ]
     // About one byte per millisecond until the 500 ms read timeout closes

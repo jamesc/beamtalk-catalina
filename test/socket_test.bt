@@ -135,7 +135,7 @@ TestCase subclass: SocketTest
           with: 0
           with: 5000
         chunk isOk ifTrue: [
-          received := received + chunk value size
+          received := received + chunk value byteSize
         ] ifFalse: [done := true]
       ]
     self assert: received equals: size

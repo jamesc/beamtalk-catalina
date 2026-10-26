@@ -5,6 +5,6 @@
 RecordingHandler subclass: StatePasser
 
   handleData: data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
-    data =:= "ping" ifTrue: [
+    (HandlerHarness textOf: data) =:= "ping" ifTrue: [
       HandlerResult close: st
     ] ifFalse: [HandlerResult continue: st]
