@@ -36,7 +36,7 @@
 /// ```
 Protocol define: Transport
   /// Open a listen socket on `port` (0 for an ephemeral port).
-  class listen: port :: Integer options: options :: List -> Result(Port | Tuple, Object)
+  class listen: port :: Integer options: options :: List(Symbol | Tuple) -> Result(Port | Tuple, Object)
 
   /// Wait for a connection on a listen socket.
   class accept: listenSocket :: Object -> Result(Port | Tuple, Object)
@@ -63,7 +63,7 @@ Protocol define: Transport
   class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object)
 
   /// Read socket options.
-  class getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List, Object)
+  class getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object)
 
   /// Set socket options.
   class setopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(Nil, Object)
@@ -75,10 +75,10 @@ Protocol define: Transport
   class close: socket :: Object -> Result(Nil, Object)
 
   /// The local `{ip, port}` of a connection or listen socket.
-  class sockname: socket :: Object -> Result(Tuple, Object)
+  class sockname: socket :: Object -> Result(SocketAddress, Object)
 
   /// The remote `{ip, port}` of a connection.
-  class peername: socket :: Object -> Result(Tuple, Object)
+  class peername: socket :: Object -> Result(SocketAddress, Object)
 
   /// The peer's DER certificate, or `Result error: #not_secure`.
   class peercert: socket :: Object -> Result(Binary, Object)
@@ -87,10 +87,10 @@ Protocol define: Transport
   class isSecure -> Boolean
 
   /// The socket's `inet:getstat/1` counters.
-  class getstat: socket :: Object -> Result(List(Tuple), Object)
+  class getstat: socket :: Object -> Result(List(Tuple(Symbol, Integer)), Object)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
   class negotiatedProtocol: socket :: Object -> Result(String, Object)
 
   /// The TLS connection information, or `Result error: #not_secure`.
-  class connectionInformation: socket :: Object -> Result(List, Object)
+  class connectionInformation: socket :: Object -> Result(List(Tuple), Object)

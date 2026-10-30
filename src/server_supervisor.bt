@@ -61,7 +61,7 @@ typed Supervisor subclass: ServerSupervisor
 
   /// The `{ip, port}` the server listens on (Thousand Island's
   /// `listener_info/1`).
-  listenerInfo -> Result(Tuple, Object) =>
+  listenerInfo -> Result(SocketAddress, Object) =>
     self listener map: [:l | l listenerInfo]
 
   /// The running `AcceptorSupervisor`s, in id order.

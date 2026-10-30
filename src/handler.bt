@@ -133,7 +133,8 @@ typed Server subclass: Handler
 
   // === Accessors ===
 
-  /// The connection's `Socket` (nil until the ready message arrives).
+  /// The connection's `Socket`. Only valid once the ready message has
+  /// arrived; reading it before then raises.
   socket -> Socket => self.socket
 
   /// The current user state.
@@ -184,7 +185,7 @@ typed Server subclass: Handler
         self stopWith: {#shutdown, {#premature_conn_closing, peer error}}
         ^nil
       ]
-    remote :: Tuple := peer value
+    remote :: SocketAddress := peer value
     self processLabel: {#catalina_connection, remote}
     span := acceptorSpan isNil
       ifTrue: [nil]
@@ -499,7 +500,7 @@ typed Server subclass: Handler
 
   /// The `send_oct`, `send_cnt`, `recv_oct` and `recv_cnt` of a `getstat`
   /// answer.
-  counters: stats :: List(Tuple) -> Dictionary(Symbol, Integer) =>
+  counters: stats :: List(Tuple(Symbol, Integer)) -> Dictionary(Symbol, Integer) =>
     result := #{}
     #(#send_oct, #send_cnt, #recv_oct, #recv_cnt)
       do: [:key |

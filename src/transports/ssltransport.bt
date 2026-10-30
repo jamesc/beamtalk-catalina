@@ -44,7 +44,7 @@ sealed typed Object subclass: SSLTransport
 
   /// Open a TLS listen socket with the resolved options. Raises unless the
   /// options supply a key and a certificate.
-  class sealed listen: port :: Integer options: userOptions :: List -> Result(Port | Tuple, Object) =>
+  class sealed listen: port :: Integer options: userOptions :: List(Symbol | Tuple) -> Result(Port | Tuple, Object) =>
     resolved := TransportOptions resolveOptions: userOptions
     (self defines: self keyOptions in: resolved)
       ifFalse: [
@@ -170,7 +170,7 @@ sealed typed Object subclass: SSLTransport
     failure isNil ifTrue: [Result ok: sent] ifFalse: [Result error: failure]
 
   /// Read socket options.
-  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List, Object) =>
+  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object) =>
     TransportResult bare: ((Erlang ssl) getopts: socket with: options)
 
   /// Set socket options.
@@ -186,11 +186,11 @@ sealed typed Object subclass: SSLTransport
     TransportResult bare: ((Erlang ssl) close: socket)
 
   /// The local `{ip, port}`.
-  class sealed sockname: socket :: Object -> Result(Tuple, Object) =>
+  class sealed sockname: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang ssl) sockname: socket)
 
   /// The remote `{ip, port}`.
-  class sealed peername: socket :: Object -> Result(Tuple, Object) =>
+  class sealed peername: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang ssl) peername: socket)
 
   /// The peer's DER certificate, or `Result error: #no_peercert`.
@@ -201,7 +201,7 @@ sealed typed Object subclass: SSLTransport
   class sealed isSecure -> Boolean => true
 
   /// The socket's counters.
-  class sealed getstat: socket :: Object -> Result(List(Tuple), Object) =>
+  class sealed getstat: socket :: Object -> Result(List(Tuple(Symbol, Integer)), Object) =>
     TransportResult bare: ((Erlang ssl) getstat: socket)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
@@ -214,5 +214,5 @@ sealed typed Object subclass: SSLTransport
     Result ok: bytes asStringUnchecked
 
   /// `ssl:connection_information/1`: protocol, cipher suite and so on.
-  class sealed connectionInformation: socket :: Object -> Result(List, Object) =>
+  class sealed connectionInformation: socket :: Object -> Result(List(Tuple), Object) =>
     TransportResult bare: ((Erlang ssl) connection_information: socket)

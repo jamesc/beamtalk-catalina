@@ -25,13 +25,13 @@
 sealed typed Object subclass: TCPTransport
 
   /// Open a listen socket with the resolved options.
-  class sealed listen: port :: Integer options: userOptions :: List -> Result(Port | Tuple, Object) =>
+  class sealed listen: port :: Integer options: userOptions :: List(Symbol | Tuple) -> Result(Port | Tuple, Object) =>
     TransportResult bare: ((Erlang gen_tcp) listen: port with: (TransportOptions unwrapStrings: (self listenOptions: userOptions)))
 
   /// The options `listen:options:` passes to `gen_tcp:listen/2`: the
   /// resolved options with `inet_backend`, which must come first, moved to
   /// the front.
-  class sealed listenOptions: userOptions :: List(Object) -> List(Object) =>
+  class sealed listenOptions: userOptions :: List(Symbol | Tuple) -> List(Symbol | Tuple) =>
     resolved := TransportOptions resolveOptions: userOptions
     backend := resolved select: [:option |
       (TransportOptions keyOf: option) =:= #inet_backend
@@ -89,7 +89,7 @@ sealed typed Object subclass: TCPTransport
     ] ensure: [(Erlang file) close: fd]
 
   /// Read socket options (`inet:getopts/2`).
-  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List, Object) =>
+  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object) =>
     TransportResult bare: ((Erlang inet) getopts: socket with: options)
 
   /// Set socket options (`inet:setopts/2`).
@@ -105,11 +105,11 @@ sealed typed Object subclass: TCPTransport
     TransportResult bare: ((Erlang gen_tcp) close: socket)
 
   /// The local `{ip, port}`.
-  class sealed sockname: socket :: Object -> Result(Tuple, Object) =>
+  class sealed sockname: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang inet) sockname: socket)
 
   /// The remote `{ip, port}`.
-  class sealed peername: socket :: Object -> Result(Tuple, Object) =>
+  class sealed peername: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang inet) peername: socket)
 
   /// Clear TCP has no peer certificate.
@@ -120,7 +120,7 @@ sealed typed Object subclass: TCPTransport
   class sealed isSecure -> Boolean => false
 
   /// The socket's `inet:getstat/1` counters.
-  class sealed getstat: socket :: Object -> Result(List(Tuple), Object) =>
+  class sealed getstat: socket :: Object -> Result(List(Tuple(Symbol, Integer)), Object) =>
     TransportResult bare: ((Erlang inet) getstat: socket)
 
   /// Clear TCP negotiates no protocol.
@@ -128,5 +128,5 @@ sealed typed Object subclass: TCPTransport
     Result error: #protocol_not_negotiated
 
   /// Clear TCP has no TLS connection information.
-  class sealed connectionInformation: _socket :: Object -> Result(List, Object) =>
+  class sealed connectionInformation: _socket :: Object -> Result(List(Tuple), Object) =>
     Result error: #not_secure

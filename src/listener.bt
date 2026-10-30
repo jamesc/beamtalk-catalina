@@ -35,7 +35,7 @@ typed Actor subclass: Listener
   // The `#listener` span, started by `initialize` once the sockets are open.
   late state: span :: CatalinaTelemetry
   // The first socket's `{ip, port}` (or `{local, path}`), set by `initialize`.
-  late state: localInfo :: Tuple
+  late state: localInfo :: SocketAddress
 
   class supervisionPolicy -> RestartStrategy => #transient
 
@@ -47,7 +47,7 @@ typed Actor subclass: Listener
   initialize -> Nil => self openSockets
 
   /// The local `{ip, port}` of the first listen socket.
-  listenerInfo -> Tuple => self.localInfo
+  listenerInfo -> SocketAddress => self.localInfo
 
   /// The listen socket acceptor `id` accepts on.
   acceptorInfo: id :: Integer -> Port | Tuple =>
@@ -77,7 +77,7 @@ typed Actor subclass: Listener
         opened do: [:s | transport close: s]
         ^self failWith: info error
       ]
-    local :: Tuple := info value
+    local :: SocketAddress := info value
     port := self bindPort: local
     2
       to: self.config numListenSockets
