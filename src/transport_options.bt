@@ -60,18 +60,7 @@ sealed typed Object subclass: TransportOptions
       ++ userOptions
       ++ (self defaultNodelayOptions: userOptions)
       ++ self defaultOptions
-    seen := #()
-    resolved := #()
-    all
-      do: [:option |
-        key := self keyOf: option
-        (seen includes: key)
-          ifFalse: [
-            seen := seen add: key
-            resolved := resolved add: option
-          ]
-      ]
-    resolved
+    all withoutDuplicatesBy: [:option | self keyOf: option]
 
   /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
   class sealed defaultNodelayOptions: userOptions :: List(Object) -> List(Object) =>
