@@ -114,6 +114,7 @@ typed Server subclass: Acceptor
       config: self.config
       handlerConfig: self.handlerConfig
       span: self.span
+      acceptor: self pid
     // A failed start is one connection's problem: Connection has closed the
     // socket, so report it and carry on.
     started isError ifTrue: [self spawnError: started error]

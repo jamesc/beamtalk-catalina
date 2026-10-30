@@ -27,20 +27,20 @@
 /// ## Examples
 /// ```beamtalk
 /// // In the acceptor, with an accepted raw socket:
-/// Connection start: raw connections: sup config: config handlerConfig: hc span: nil
+/// Connection start: raw connections: sup config: config handlerConfig: hc span: nil acceptor: self pid
 /// // => Result ok: nil
 /// ```
 sealed typed Object subclass: Connection
 
-  class sealed start: rawSocket :: Port | Tuple connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Result(Nil, Object) =>
+  /// The acceptor passes its own pid explicitly: this runs in the caller's
+  /// process, so calling `erlang:self/0` here would read the caller, not the
+  /// class process.
+  class sealed start: rawSocket :: Port | Tuple connections: connections :: ConnectionSupervisor config: config :: ServerConfig handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil acceptor: acceptor :: Pid -> Result(Nil, Object) =>
     startTime := CatalinaTelemetry monotonicTime
     transport := handlerConfig transport
     started := self
       startChildOn: connections
-      args: #{
-        #handlerOptions => config handlerOptions,
-        #acceptor => Erlang erlang self
-      }
+      args: #{#handlerOptions => config handlerOptions, #acceptor => acceptor}
       retries: config maxConnectionsRetryCount
       wait: config maxConnectionsRetryWait
     started isError

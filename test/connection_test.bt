@@ -21,6 +21,7 @@ TestCase subclass: ConnectionTest
       config: config
       handlerConfig: handlerConfig
       span: nil
+      acceptor: Erlang erlang self
     self assert: result error equals: {#controlling_process, #badarg}
     handlerPid := table at: #started
     self assert: (table at: #controllingProcess) equals: handlerPid
