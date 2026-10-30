@@ -11,8 +11,8 @@ sealed typed Object subclass: HandlerHarness
   /// Start a one-acceptor server for `handler` (on port 0 unless `options`
   /// names one), merging `options` into the
   /// server options and `#table => name` into `handlerOptions`, and answer
-  /// its port.
-  class sealed start: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> Integer =>
+  /// it. `stopAll:` stops it with the test's other servers.
+  class sealed startServer: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> ServerSupervisor =>
     withPort := (options includesKey: #port) ifTrue: [
       options
     ] ifFalse: [options at: #port put: 0]
@@ -22,7 +22,17 @@ sealed typed Object subclass: HandlerHarness
     srv := (Catalina start: all) unwrap
     table := Ets named: name
     table at: #servers put: ((table at: #servers ifAbsent: [#()]) add: srv)
-    srv listenerInfo unwrap at: 2
+    srv
+
+  /// Start a server as `startServer:` does, and answer its port. Only for
+  /// IP servers: a Unix domain socket server has no port.
+  class sealed start: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> Integer =>
+    srv := self
+      startServer: handler
+      options: options
+      table: name
+    port :: Integer := srv listenerInfo unwrap at: 2
+    port
 
   /// The server started last.
   class sealed serverIn: name :: Symbol -> ServerSupervisor =>

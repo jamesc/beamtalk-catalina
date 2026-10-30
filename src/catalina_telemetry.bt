@@ -156,5 +156,5 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// The process-dictionary key marking that this span ended with an
   /// exception.
-  exceptionMarker -> Tuple =>
+  exceptionMarker -> Tuple(Symbol, Reference | Nil) =>
     {#catalina_exception_emitted, self.telemetrySpanContext}

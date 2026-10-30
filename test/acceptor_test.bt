@@ -30,7 +30,9 @@ TestCase subclass: AcceptorTest
       #port => port
     }
 
-  portOf: srv :: ServerSupervisor -> Integer => srv listenerInfo unwrap at: 2
+  portOf: srv :: ServerSupervisor -> Integer =>
+    port :: Integer := srv listenerInfo unwrap at: 2
+    port
 
   connect: port :: Integer -> Object =>
     ((Erlang gen_tcp)

@@ -26,11 +26,11 @@
 sealed typed Object subclass: TransportOptions
 
   /// Options Catalina needs and the user cannot override.
-  class sealed requiredOptions -> List(Object) =>
+  class sealed requiredOptions -> List(Symbol | Tuple) =>
     #({#mode, #binary}, {#active, false})
 
   /// Defaults the user can override.
-  class sealed defaultOptions -> List(Object) =>
+  class sealed defaultOptions -> List(Symbol | Tuple) =>
     #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 
   // Untyped FFI by design: `deep_unwrap_strings/1` has no stub, and its
@@ -55,7 +55,7 @@ sealed typed Object subclass: TransportOptions
     (Erlang beamtalk_primitive) deep_unwrap_strings: data
 
   /// Required, then user, then default options, first one per key wins.
-  class sealed resolveOptions: userOptions :: List(Object) -> List(Object) =>
+  class sealed resolveOptions: userOptions :: List(Symbol | Tuple) -> List(Symbol | Tuple) =>
     all := self requiredOptions
       ++ userOptions
       ++ (self defaultNodelayOptions: userOptions)
@@ -63,7 +63,7 @@ sealed typed Object subclass: TransportOptions
     all withoutDuplicatesBy: [:option | self keyOf: option]
 
   /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
-  class sealed defaultNodelayOptions: userOptions :: List(Object) -> List(Object) =>
+  class sealed defaultNodelayOptions: userOptions :: List(Symbol | Tuple) -> List(Symbol | Tuple) =>
     ((self isLocal: (Erlang proplists get_value: #ip with: userOptions)) or: [
       self isLocal: (Erlang proplists get_value: #ifaddr with: userOptions)
     ]) ifTrue: [#()] ifFalse: [#({#nodelay, true})]

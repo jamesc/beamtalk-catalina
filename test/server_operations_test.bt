@@ -26,6 +26,12 @@ TestCase subclass: ServerOperationsTest
       options: options
       table: self tableName
 
+  startServer: handler options: options :: Dictionary -> ServerSupervisor =>
+    HandlerHarness
+      startServer: handler
+      options: options
+      table: self tableName
+
   server -> ServerSupervisor => HandlerHarness serverIn: self tableName
 
   connect: port :: Integer -> Object =>
@@ -312,7 +318,7 @@ TestCase subclass: ServerOperationsTest
 
   testServesOverAUnixDomainSocket =>
     path := File tempDirectory ++ "/catalina_uds_" ++ System uniqueId printString ++ ".sock"
-    self start: EchoHandler options: #{
+    self startServer: EchoHandler options: #{
       #transportOptions => #({#ip, {#local, path}})
     }
     client := ((Erlang gen_tcp)
@@ -336,7 +342,8 @@ TestCase subclass: ServerOperationsTest
         #numAcceptors => 1,
         #handlerOptions => nil
       }) unwrap
-    client := self connect: (srv listenerInfo unwrap at: 2)
+    port :: Integer := srv listenerInfo unwrap at: 2
+    client := self connect: port
     self send: "HI" to: client
     self assert: (self recv: client) equals: "HI"
     srv stop

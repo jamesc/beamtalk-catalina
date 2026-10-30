@@ -10,7 +10,9 @@ TestCase subclass: ServerTest
   start: options :: Dictionary -> ServerSupervisor =>
     (Catalina start: (options at: #port put: 0)) unwrap
 
-  portOf: srv :: ServerSupervisor -> Integer => srv listenerInfo unwrap at: 2
+  portOf: srv :: ServerSupervisor -> Integer =>
+    port :: Integer := srv listenerInfo unwrap at: 2
+    port
 
   connect: port :: Integer -> Object =>
     ((Erlang gen_tcp)
@@ -56,7 +58,8 @@ TestCase subclass: ServerTest
     srv := self start: #{#handler => EchoHandler, #numAcceptors => 1}
     info := srv listenerInfo unwrap
     self assert: (info at: 1) equals: {0, 0, 0, 0}
-    self assert: (info at: 2) > 0
+    port :: Integer := info at: 2
+    self assert: port > 0
     srv stop
 
   testConnectionPids =>

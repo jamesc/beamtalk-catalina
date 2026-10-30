@@ -1,6 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// A socket address, as `sockname`, `peername` and `listenerInfo` answer
+/// it: `{ip, port}` for IP sockets (an IPv4 or IPv6 tuple and the port),
+/// or `{local, path}` for Unix domain sockets (the path arrives as bytes).
+/// One 2-tuple with union elements rather than a union of 2-tuples, so
+/// `at: 1`/`at: 2` keep their static types.
+type SocketAddress = Tuple(Tuple | Symbol, Integer | Binary)
+
 /// Socket — a client connection as a handler sees it: the raw socket, the
 /// `Transport` class that drives it, and the connection's settings, as
 /// Thousand Island's `ThousandIsland.Socket`.
@@ -32,14 +39,14 @@ sealed typed Value subclass: Socket
   field: transport :: Dynamic = TCPTransport
   field: readTimeout :: Integer | #infinity = 60000
   field: handshakeTimeout :: Integer | #infinity = 5000
-  field: peername :: Tuple | Nil = nil
+  field: peername :: SocketAddress | Nil = nil
   field: silentTerminateOnError :: Boolean = false
   // The connection telemetry span; nil for a Socket made outside a server.
   field: span :: CatalinaTelemetry | Nil = nil
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
-  class sealed wrap: rawSocket :: Port | Tuple peername: peer :: Tuple | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
+  class sealed wrap: rawSocket :: Port | Tuple peername: peer :: SocketAddress | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
     Socket
       socket: rawSocket
       transport: handlerConfig transport
@@ -139,7 +146,7 @@ sealed typed Value subclass: Socket
   close -> Result(Nil, Object) => self.transport close: self.socket
 
   /// Read socket options.
-  getopts: options :: List(Symbol | Tuple) -> Result(List, Object) =>
+  getopts: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object) =>
     self.transport getopts: self.socket options: options
 
   /// Set socket options.
@@ -147,10 +154,11 @@ sealed typed Value subclass: Socket
     self.transport setopts: self.socket options: options
 
   /// The local `{ip, port}`.
-  sockname -> Result(Tuple, Object) => self.transport sockname: self.socket
+  sockname -> Result(SocketAddress, Object) =>
+    self.transport sockname: self.socket
 
   /// The remote `{ip, port}` captured at accept time. Always `Result ok:`.
-  peername -> Result(Tuple | Nil, Object) => Result ok: self.peername
+  peername -> Result(SocketAddress | Nil, Object) => Result ok: self.peername
 
   /// The peer's DER certificate, or `Result error: #not_secure`.
   peercert -> Result(Binary, Object) => self.transport peercert: self.socket
@@ -159,14 +167,15 @@ sealed typed Value subclass: Socket
   isSecure -> Boolean => self.transport isSecure
 
   /// The socket's `inet:getstat/1` counters.
-  getstat -> Result(List(Tuple), Object) => self.transport getstat: self.socket
+  getstat -> Result(List(Tuple(Symbol, Integer)), Object) =>
+    self.transport getstat: self.socket
 
   /// The protocol negotiated in the handshake (ALPN), if any.
   negotiatedProtocol -> Result(String, Object) =>
     self.transport negotiatedProtocol: self.socket
 
   /// The TLS connection information, or `Result error: #not_secure`.
-  connectionInformation -> Result(List, Object) =>
+  connectionInformation -> Result(List(Tuple), Object) =>
     self.transport connectionInformation: self.socket
 
   /// The telemetry span covering this connection (nil outside a server).

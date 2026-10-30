@@ -14,7 +14,8 @@ TestCase subclass: SocketTest
 
   setUp =>
     self.listenSocket := (TCPTransport listen: 0 options: #()) unwrap
-    self.port := (TCPTransport sockname: self.listenSocket) unwrap at: 2
+    port :: Integer := (TCPTransport sockname: self.listenSocket) unwrap at: 2
+    self.port := port
 
   tearDown => TCPTransport close: self.listenSocket
 

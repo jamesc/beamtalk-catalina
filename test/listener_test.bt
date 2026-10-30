@@ -76,7 +76,8 @@ TestCase subclass: ListenerTest
     listener := Listener spawnWith: #{#config => (self configFor: 0)}
     info := listener listenerInfo
     self assert: (info at: 1) equals: {0, 0, 0, 0}
-    self assert: (info at: 2) > 0
+    port :: Integer := info at: 2
+    self assert: port > 0
     listener stop
 
   testAcceptorInfoAnswersTheListenSocket =>

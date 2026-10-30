@@ -125,7 +125,7 @@ TestCase subclass: SocketReuseTest
     started isOk
       ifTrue: [
         srv := started value
-        port := srv listenerInfo unwrap at: 2
+        port :: Integer := srv listenerInfo unwrap at: 2
         self assert: port > 0
         (1 to: 5)
           do: [:i |
@@ -148,7 +148,7 @@ TestCase subclass: SocketReuseTest
     started isOk
       ifTrue: [
         srv := started value
-        port := srv listenerInfo unwrap at: 2
+        port :: Integer := srv listenerInfo unwrap at: 2
         self assert: (self echo: "test" to: port) equals: "test"
         srv stop
       ]
