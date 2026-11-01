@@ -11,6 +11,11 @@ TestCase subclass: ServerConfigTest
     result isError ifTrue: [result error message] ifFalse: [""]
 
   // ===== server_config exceptions (config_test.exs) =====
+  testDocumentedExample =>
+    config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
+    self assert: config port equals: 0
+    self assert: config numAcceptors equals: 100
+
   testRaisesWhenHandlerIsNil =>
     message := self errorFor: #{#port => 4000, #handler => nil}
     self assert: (message includesSubstring: "No handler")

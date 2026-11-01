@@ -1,6 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// One listen option: a bare atom (`#binary`) or a `{key, value}` pair
+/// (`{#backlog, 1024}`). See `resolveOptions:` for one bullet per key
+/// Catalina itself defines.
+type TransportOption = Symbol | Tuple
+
 /// TransportOptions — builds the listen options a transport passes to
 /// `gen_tcp:listen/2` or `ssl:listen/2`, as Thousand Island's
 /// `Transport.resolve_options/1` does.
@@ -26,11 +31,11 @@
 sealed typed Object subclass: TransportOptions
 
   /// Options Catalina needs and the user cannot override.
-  class sealed requiredOptions -> List(Symbol | Tuple) =>
+  class sealed requiredOptions -> List(TransportOption) =>
     #({#mode, #binary}, {#active, false})
 
   /// Defaults the user can override.
-  class sealed defaultOptions -> List(Symbol | Tuple) =>
+  class sealed defaultOptions -> List(TransportOption) =>
     #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 
   // Untyped FFI by design: `deep_unwrap_strings/1` has no stub, and its
@@ -55,7 +60,21 @@ sealed typed Object subclass: TransportOptions
     (Erlang beamtalk_primitive) deep_unwrap_strings: data
 
   /// Required, then user, then default options, first one per key wins.
-  class sealed resolveOptions: userOptions :: List(Symbol | Tuple) -> List(Symbol | Tuple) =>
+  ///
+  /// ## Arguments
+  /// - `userOptions` (List(TransportOption)) — listen options that win over the defaults but not the required ones.
+  ///
+  /// ## Options
+  /// - `{#mode, #binary}` (required) — sockets deliver bytes; the user cannot override this.
+  /// - `{#active, false}` (required) — accepted sockets stay passive until the handler arms them.
+  /// - `{#backlog, 1024}` (default) — most pending connections the listen socket queues.
+  /// - `{#send_timeout, 30000}` (default) — milliseconds a send waits before timing out.
+  /// - `{#send_timeout_close, true}` (default) — close the socket when a send times out.
+  /// - `{#reuseaddr, true}` (default) — allow rebinding an address in use by a closing socket.
+  /// - `{#nodelay, true}` (default for IP sockets) — disable Nagle; left out for Unix domain sockets.
+  /// - Anything else passes through to `gen_tcp:listen/2` or `ssl:listen/2`
+  ///   (`{#certfile, path}`, `{#ip, address}`, `#inet6`, `{#local, path}`, ...).
+  class sealed resolveOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
     all := self requiredOptions
       ++ userOptions
       ++ (self defaultNodelayOptions: userOptions)
@@ -63,7 +82,7 @@ sealed typed Object subclass: TransportOptions
     all withoutDuplicatesBy: [:option | self keyOf: option]
 
   /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
-  class sealed defaultNodelayOptions: userOptions :: List(Symbol | Tuple) -> List(Symbol | Tuple) =>
+  class sealed defaultNodelayOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
     ((self isLocal: (Erlang proplists get_value: #ip with: userOptions)) or: [
       self isLocal: (Erlang proplists get_value: #ifaddr with: userOptions)
     ]) ifTrue: [#()] ifFalse: [#({#nodelay, true})]

@@ -1,32 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// The options `ServerConfig fromOptions:` accepts: Symbol keys with
+/// values checked at each use site. See `fromOptions:` for one bullet
+/// per key.
+type ServerOptions = Dictionary(Symbol, Object)
+
 /// ServerConfig — the configuration of one Catalina server, as Thousand
-/// Island's `ThousandIsland.ServerConfig`. The options and their defaults
-/// are Thousand Island's, in camelCase:
-///
-/// | Option | Default | Thousand Island |
-/// |---|---|---|
-/// | `port` | `4000` | `port` |
-/// | `transport` | `TCPTransport` | `transport_module` |
-/// | `transportOptions` | `#()` | `transport_options` |
-/// | `handler` | none, required | `handler_module` |
-/// | `handlerOptions` | `#()` | `handler_options` |
-/// | `genServerOptions` | `#()` | `genserver_options` |
-/// | `supervisorOptions` | `#()` | `supervisor_options` |
-/// | `numAcceptors` | `100` | `num_acceptors` |
-/// | `numListenSockets` | `1` | `num_listen_sockets` |
-/// | `numConnections` | `16384` (or `#infinity`) | `num_connections` |
-/// | `maxConnectionsRetryCount` | `5` | `max_connections_retry_count` |
-/// | `maxConnectionsRetryWait` | `1000` | `max_connections_retry_wait` |
-/// | `readTimeout` | `60000` (or `#infinity`) | `read_timeout` |
-/// | `handshakeTimeout` | `5000` (or `#infinity`) | `handshake_timeout` |
-/// | `shutdownTimeout` | `15000` (or `#infinity`) | `shutdown_timeout` |
-/// | `silentTerminateOnError` | `false` | `silent_terminate_on_error` |
+/// Island's `ThousandIsland.ServerConfig`. The option names and their
+/// defaults are Thousand Island's, in camelCase (`transport` and `handler`
+/// are `transport_module` and `handler_module` there, `genServerOptions`
+/// is `genserver_options`; the rest are the camelCase of the snake_case
+/// names).
 ///
 /// Build one with `fromOptions:`, which validates the options as
 /// `ServerConfig.new/1` does. (`new:` is sealed on `Value`, so the
-/// validating constructor has its own name.)
+/// validating constructor has its own name.) See `fromOptions:` for one
+/// bullet per option.
 ///
 /// `transportOptions` and `supervisorOptions` take a Dictionary, such as
 /// `#{#reuseport => true, #certfile => "cert.pem"}`, or a List, which is
@@ -38,12 +28,6 @@
 /// see `atomOptions`) become the bare atom for `true` and are left out for
 /// `false`. A Dictionary has no order, so use a List when the order of the
 /// options matters.
-///
-/// ## Examples
-/// ```beamtalk
-/// config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
-/// config numAcceptors   // => 100
-/// ```
 sealed typed Value subclass: ServerConfig
   field: port :: Integer = 4000
   // Any class conforming to `Transport`; a protocol's class side has no type
@@ -71,7 +55,34 @@ sealed typed Value subclass: ServerConfig
   /// `supervisorOptions` that are not a valid Dictionary or a List, more
   /// listen sockets than acceptors, or several listen sockets without
   /// `reuseport` or `reuseport_lb` in `transportOptions`.
-  class sealed fromOptions: options :: Dictionary(Symbol, Object) -> ServerConfig =>
+  ///
+  /// ## Arguments
+  /// - `options` (ServerOptions) — the server options, one entry per key below.
+  ///
+  /// ## Options
+  /// - `#handler` (Handler class, required) — the handler class started per connection; see `Handler`.
+  /// - `#port` (Integer, default `4000`) — the port to listen on.
+  /// - `#transport` (Dynamic, default `TCPTransport`) — the transport class; any class conforming to `Transport`.
+  /// - `#transportOptions` (Dictionary or List, default `#()`) — listen options for `gen_tcp:listen/2` or `ssl:listen/2`; a Dictionary becomes a proplist once, a List passes through raw; see `TransportOptions`.
+  /// - `#handlerOptions` (Object, default `#()`) — the first user state of each handler; see `Handler`.
+  /// - `#genServerOptions` (List, default `#()`) — accepted and stored; no engine reads it yet.
+  /// - `#supervisorOptions` (Dictionary or List, default `#()`) — supervisor start options; a `{#name, n}` entry registers the server (see `Catalina`); a Dictionary becomes a proplist once, a List passes through raw.
+  /// - `#numAcceptors` (Integer, default `100`) — acceptor processes waiting on the listen sockets.
+  /// - `#numListenSockets` (Integer, default `1`) — listen sockets; more than one needs `reuseport` or `reuseport_lb` in `transportOptions`.
+  /// - `#numConnections` (Integer | `#infinity`, default `16384`) — most handler processes at once per acceptor.
+  /// - `#maxConnectionsRetryCount` (Integer, default `5`) — times a handler start is retried while the connection supervisor is full.
+  /// - `#maxConnectionsRetryWait` (Integer, default `1000`) — milliseconds between handler start retries.
+  /// - `#readTimeout` (Integer | `#infinity`, default `60000`) — milliseconds to wait for the next bytes; see `HandlerConfig`.
+  /// - `#handshakeTimeout` (Integer | `#infinity`, default `5000`) — milliseconds for the transport handshake.
+  /// - `#shutdownTimeout` (Integer | `#infinity`, default `15000`) — milliseconds each handler gets to stop.
+  /// - `#silentTerminateOnError` (Boolean, default `false`) — don't log handler errors as crashes; see `Handler`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
+  /// config numAcceptors   // => 100
+  /// ```
+  class sealed fromOptions: options :: ServerOptions -> ServerConfig =>
     self validateKeys: options
     config := self new: (self normaliseOptions: options)
     self validateHandler: config
@@ -87,7 +98,7 @@ sealed typed Value subclass: ServerConfig
   /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
   /// unknown option is a typo the user should hear about, as Elixir's
   /// `struct!/2` reports it.
-  class sealed validateKeys: options :: Dictionary(Symbol, Object) -> Nil =>
+  class sealed validateKeys: options :: ServerOptions -> Nil =>
     known := self optionNames
     options keys
       do: [:key |
@@ -104,7 +115,7 @@ sealed typed Value subclass: ServerConfig
     #(#binary, #list, #inet, #inet6, #local)
 
   /// `options` with `transportOptions` and `supervisorOptions` as proplists.
-  class sealed normaliseOptions: options :: Dictionary(Symbol, Object) -> Dictionary(Symbol, Object) =>
+  class sealed normaliseOptions: options :: ServerOptions -> ServerOptions =>
     #(#transportOptions, #supervisorOptions)
       inject: options
       into: [:acc :name |
