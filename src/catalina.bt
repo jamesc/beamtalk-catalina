@@ -22,7 +22,14 @@ sealed typed Object subclass: Catalina
 
   /// Start a server. `Result error:` if the options are invalid or the
   /// server cannot start (the port is taken, say).
-  class sealed start: options :: Dictionary(Symbol, Object) -> Result(ServerSupervisor, Error) =>
+  ///
+  /// ## Arguments
+  /// - `options` (ServerOptions) — the server options, one entry per key below.
+  ///
+  /// ## Options
+  /// The `ServerConfig` options; see `ServerConfig fromOptions:` for one
+  /// bullet per key.
+  class sealed start: options :: ServerOptions -> Result(ServerSupervisor, Error) =>
     configured := Result tryDo: [ServerConfig fromOptions: options]
     configured isError ifTrue: [^configured]
     config := configured value
