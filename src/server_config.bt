@@ -30,9 +30,8 @@ type ServerOptions = Dictionary(Symbol, Object)
 /// options matters.
 sealed typed Value subclass: ServerConfig
   field: port :: Integer = 4000
-  // Any class conforming to `Transport`; a protocol's class side has no type
-  // name, so it is Dynamic.
-  field: transport :: Dynamic = TCPTransport
+  // Any class conforming to `Transport` (ADR 0144).
+  field: transport :: Transport class = TCPTransport
   field: transportOptions :: List(Symbol | Tuple) = #()
   field: handler :: Handler class | Nil = nil
   field: handlerOptions :: Object = #()
