@@ -36,7 +36,7 @@ sealed typed Value subclass: Socket
   // The raw socket: a gen_tcp port, or an ssl socket record (Phase 4).
   field: socket :: Port | Tuple
   // A class conforming to `Transport` (see `ServerConfig`).
-  field: transport :: Dynamic = TCPTransport
+  field: transport :: Transport class = TCPTransport
   field: readTimeout :: Integer | #infinity = 60000
   field: handshakeTimeout :: Integer | #infinity = 5000
   field: peername :: SocketAddress | Nil = nil
@@ -69,7 +69,7 @@ sealed typed Value subclass: Socket
   /// Upgrade the connection to `newTransport` (for example to TLS) and
   /// answer the Socket over the upgraded socket. `options` go to the new
   /// transport unchanged.
-  upgrade: newTransport :: Dynamic options: options :: Object -> Result(Socket, Object) =>
+  upgrade: newTransport :: Transport class options: options :: Object -> Result(Socket, Object) =>
     (newTransport upgrade: self.socket options: options) map: [:inner |
       (self withSocket: inner) withTransport: newTransport
     ]

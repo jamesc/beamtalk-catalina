@@ -12,9 +12,8 @@
 /// ```
 sealed typed Value subclass: HandlerConfig
   field: handler :: Handler class | Nil = nil
-  // Any class conforming to `Transport`; a protocol's class side has no type
-  // name, so it is Dynamic.
-  field: transport :: Dynamic = TCPTransport
+  // Any class conforming to `Transport` (ADR 0144).
+  field: transport :: Transport class = TCPTransport
   // `Integer | #infinity` rather than the `Timeout` alias, whose Integer
   // defaults are rejected (BT-4039).
   field: readTimeout :: Integer | #infinity = 60000
