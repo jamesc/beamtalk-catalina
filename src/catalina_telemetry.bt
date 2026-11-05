@@ -61,7 +61,9 @@ sealed typed Value subclass: CatalinaTelemetry
     timed := (timed includesKey: #system_time) ifTrue: [
       timed
     ] ifFalse: [timed at: #system_time put: self systemTime]
-    context := Reference new
+    // Not `Reference new`: that is a call into the Reference class
+    // process, once per span (per connection for `#connection`; BT-4467).
+    context := Erlang erlang make_ref
     start := metadata at: #telemetry_span_context put: context
     self
       emit: name
