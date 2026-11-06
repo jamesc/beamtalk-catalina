@@ -116,7 +116,11 @@ protocol for your own (sealed, with `class sealed` methods).
 `CatalinaTelemetry`). Attach with the stdlib `Telemetry attach:to:do:`, or
 `CatalinaLogger attach: #error`/`#info`/`#debug`/`#trace` to log them.
 `Socket telemetrySpan` is the connection's `CatalinaTelemetry` span, and
-its `telemetrySpanContext` parents your own spans.
+its `telemetrySpanContext` parents your own spans. Each connection asks
+once, when it opens, whether any handler is attached to `[catalina,
+connection, ...]`; if none is, its span is silent (`Socket isTraced` is
+false): it still has a context, but emits no events and closes without a
+`getstat`. A handler attached later reaches the connections opened after it.
 
 Not there yet: a handler cannot handle a linked process's abnormal exit
 itself (BT-4052).
