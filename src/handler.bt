@@ -187,16 +187,22 @@ typed Server subclass: Handler
       ]
     remote :: SocketAddress := peer value
     self processLabel: {#catalina_connection, remote}
+    // Asked once per connection: with no handler attached, the span is
+    // silent and none of its events build anything (BT-4483).
     span := acceptorSpan isNil
       ifTrue: [nil]
       ifFalse: [
-        acceptorSpan
-          startChild: #connection
-          measurements: #{#monotonic_time => start}
-          metadata: #{
-            #remote_address => (remote at: 1),
-            #remote_port => (remote at: 2)
-          }
+        CatalinaTelemetry connectionsTraced
+          ifTrue: [
+            acceptorSpan
+              startChild: #connection
+              measurements: #{#monotonic_time => start}
+              metadata: #{
+                #remote_address => (remote at: 1),
+                #remote_port => (remote at: 2)
+              }
+          ]
+          ifFalse: [CatalinaTelemetry silent: #connection parent: acceptorSpan]
       ]
     sock := Socket
       wrap: raw
@@ -211,9 +217,10 @@ typed Server subclass: Handler
         self stopWith: {#shutdown, {#handshake, shaken error}}
         ^nil
       ]
-    self.socket := shaken value
-    span isNil
-      ifFalse: [
+    ready := shaken value
+    self.socket := ready
+    ready isTraced
+      ifTrue: [
         span
           event: #ready
           measurements: #{}
@@ -259,7 +266,9 @@ typed Server subclass: Handler
         sock := self.socket
         raw =:= sock socket
           ifTrue: [
-            sock untimed: #async_recv measurements: #{#data => data}
+            sock isTraced ifTrue: [
+              sock untimed: #async_recv measurements: #{#data => data}
+            ]
             result := [
               self
                 handleData: data
@@ -481,9 +490,16 @@ typed Server subclass: Handler
 
   /// Close the socket and stop the connection span with the `getstat`
   /// counters and, unless `closeReason` is a clean one, `#error`
-  /// (`do_socket_close/2`).
+  /// (`do_socket_close/2`). A silent span needs no counters: the socket
+  /// is closed and the span stopped without a `getstat`.
   close: sock :: Socket reason: closeReason :: Object -> Nil =>
     span := sock telemetrySpan
+    sock isTraced
+      ifFalse: [
+        sock close
+        span isNil ifFalse: [span stop]
+        ^nil
+      ]
     stats := sock getstat
     sock close
     span isNil

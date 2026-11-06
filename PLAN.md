@@ -789,6 +789,13 @@ the stdlib facade.
 - Fixed in passing: the acceptor now stops the `withTimeout:` proxy it
   creates to ask the listener for its socket.
 - `CatalinaLogger` is the minimal Logger moved here from Phase 6.
+- Deviation (BT-4483): a connection asks `Telemetry hasHandlers:
+  #(#catalina, #connection)` once in `onReady:`. With no handler attached,
+  its span is silent (`CatalinaTelemetry silent:parent:`): no `Telemetry`
+  calls, no measurement or metadata Dictionaries, and no `getstat` on
+  close. Thousand Island always emits, leaving the no-listener case to
+  `telemetry`. Handlers attached later reach the connections opened after
+  them.
 
 The plan as written:
 

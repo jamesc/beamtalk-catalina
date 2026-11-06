@@ -23,7 +23,8 @@ type SocketAddress = Tuple(Tuple | Symbol, Integer | Binary)
 /// accepted, so it still works after the client has reset the connection.
 ///
 /// `recv:...`, `send:`, `sendfile:...` and `shutdown:` emit their
-/// telemetry events on the connection span (see `CatalinaTelemetry`).
+/// telemetry events on the connection span (see `CatalinaTelemetry`),
+/// unless it is silent (`isTraced`).
 ///
 /// ## Examples
 /// ```beamtalk
@@ -88,23 +89,31 @@ sealed typed Value subclass: Socket
       recv: self.socket
       length: length
       timeout: (timeout ifNil: [self.readTimeout])
-    result isOk ifTrue: [
-      self untimed: #recv measurements: #{#data => result value}
-    ] ifFalse: [self event: #recv_error measurements: #{#error => result error}]
+    self isTraced
+      ifTrue: [
+        result isOk ifTrue: [
+          self untimed: #recv measurements: #{#data => result value}
+        ] ifFalse: [
+          self event: #recv_error measurements: #{#error => result error}
+        ]
+      ]
     result
 
   /// Send a String or iodata. Emits `send` (`#data`) or `send_error`
   /// (`#data`, `#error`).
   send: data :: Object -> Result(Nil, Object) =>
     result := self.transport send: self.socket data: data
-    result isOk ifTrue: [
-      self untimed: #send measurements: #{#data => data}
-    ] ifFalse: [
-      self event: #send_error measurements: #{
-        #data => data,
-        #error => result error
-      }
-    ]
+    self isTraced
+      ifTrue: [
+        result isOk ifTrue: [
+          self untimed: #send measurements: #{#data => data}
+        ] ifFalse: [
+          self event: #send_error measurements: #{
+            #data => data,
+            #error => result error
+          }
+        ]
+      ]
     result
 
   /// Send `length` bytes of the file at `filename` from `offset` (0: to the
@@ -116,6 +125,7 @@ sealed typed Value subclass: Socket
       filename: filename
       offset: offset
       length: length
+    self isTraced ifFalse: [^result]
     result isOk
       ifTrue: [
         self untimed: #sendfile measurements: #{
@@ -139,7 +149,9 @@ sealed typed Value subclass: Socket
   /// Shut the connection down in one direction: `#read`, `#write` or
   /// `#read_write`. Emits `socket_shutdown` (`#way`).
   shutdown: way :: Symbol -> Result(Nil, Object) =>
-    self event: #socket_shutdown measurements: #{#way => way}
+    self isTraced ifTrue: [
+      self event: #socket_shutdown measurements: #{#way => way}
+    ]
     self.transport shutdown: self.socket how: way
 
   /// Close the connection. The handler that owns it also closes it when it exits.
@@ -180,6 +192,13 @@ sealed typed Value subclass: Socket
 
   /// The telemetry span covering this connection (nil outside a server).
   telemetrySpan -> CatalinaTelemetry | Nil => self.span
+
+  /// Whether this connection's span emits events: false outside a server
+  /// and for a silent span (no handler attached when the connection
+  /// opened). Callers check it before building an event's measurements.
+  isTraced -> Boolean =>
+    span := self.span
+    span isNil ifTrue: [false] ifFalse: [span enabled]
 
   /// An event on the connection span, with the time (`span_event/4`).
   event: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) -> Socket =>

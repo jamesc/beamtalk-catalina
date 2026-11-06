@@ -96,6 +96,68 @@ TestCase subclass: TelemetryTest
     self assert: (metadata at: #handler) equals: TelemetryTest
     self assert: (self isReference: (metadata at: #telemetry_span_context))
 
+  // ===== silent connection spans (BT-4483) =====
+  testSilentSpanEmitsNothing =>
+    TelemetryCollector attachAll: TelemetryTest table: self tableName
+    parent := CatalinaTelemetry
+      startSpan: #acceptor
+      measurements: #{}
+      metadata: #{#handler => TelemetryTest}
+    span := CatalinaTelemetry silent: #connection parent: parent
+    self deny: span enabled
+    self assert: span handler equals: TelemetryTest
+    self assert: (self isReference: span telemetrySpanContext)
+    span
+      event: #ready
+      measurements: #{}
+      metadata: #{}
+    span
+      untimedEvent: #recv
+      measurements: #{}
+      metadata: #{}
+    span
+      exceptionKind: #error
+      reason: #nope
+      stacktrace: #()
+    span stop
+    self assert: self connectionEventNames equals: #()
+    sock := Socket
+      wrap: {#unused}
+      peername: nil
+      handlerConfig: HandlerConfig new
+      span: span
+    self deny: sock isTraced
+    self assert: (sock withSpan: parent) isTraced
+
+  testSocketOutsideAServerIsNotTraced =>
+    sock := Socket
+      wrap: {#unused}
+      peername: nil
+      handlerConfig: HandlerConfig new
+      span: nil
+    self deny: sock isTraced
+
+  testHandlerAttachedMidRunReachesLaterConnections =>
+    // Started with no collector: the first connection may be silent (or
+    // traced for another suite's handler), and either way none of its
+    // events reach this table. The one opened after the attach is traced.
+    port := HandlerHarness
+      start: TelemetryEcho
+      options: #{}
+      table: self tableName
+    first := self connect: port
+    (Erlang gen_tcp) send: first with: "ONE"
+    self assert: (self recv: first) equals: "ONE"
+    TelemetryCollector attachAll: TelemetryEcho table: self tableName
+    second := self connect: port
+    (Erlang gen_tcp) send: second with: "TWO"
+    self assert: (self recv: second) equals: "TWO"
+    self deny: (self await: #connection named: #send) isNil
+    self assert: (self count: #connection named: #start) equals: 1
+    (Erlang gen_tcp) close: second
+    self deny: (self await: #connection named: #stop) isNil
+    self assert: (self count: #connection named: #stop) equals: 1
+
   // ===== listener_test.exs =====
   testListenerStartEvent =>
     port := self start: TelemetryEcho
