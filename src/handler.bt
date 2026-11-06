@@ -386,9 +386,7 @@ typed Server subclass: Handler
     nil
 
   startTimer: ms :: Integer deadline: deadline :: Integer -> Nil =>
-    // Not `Reference new`: that is a call into the Reference class
-    // process, once per connection here (BT-4467).
-    tag := Erlang erlang make_ref
+    tag := Reference new
     self.timerTag := tag
     self.readTimer := Timer
       send: {#catalina_read_timeout, tag}
