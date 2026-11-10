@@ -198,6 +198,18 @@ TestCase subclass: HandlerTest
     self send: "ping" to: client
     self assert: (self recv: client) equals: #closed
 
+  testCloseResultClosesTheSocketBeforeHandleClose =>
+    // Deviation (BT-4655): `handler.ex` closes in `terminate/2`, after
+    // `handle_close/2`. Catalina closes first, so the client sees the close
+    // while the slow `handleClose:` is still running, and the callback
+    // cannot send.
+    port := self start: SlowCloseOnPing
+    client := self connect: port
+    self send: "ping" to: client
+    self assert: (self recv: client within: 500) equals: #closed
+    self assert: (self awaitLogged: {#sendInClose, false})
+    self assert: (self awaitLogged: {#close, #{#table => self tableName}})
+
   testDataClosesAndCallsHandleErrorOnError =>
     port := self start: ErrorOnPing
     client := self connect: port
