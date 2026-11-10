@@ -629,6 +629,15 @@ Deviations:
   `continueWith:`. The handler's internal method is `continueReading:`
   because `continueWith:` is sealed on `Actor`.
 - The process label is `{catalina_connection, {ip, port}}` (`proc_lib:set_label/1`).
+- Deviation (BT-4655): on a `close:` result the socket is closed (and the
+  connection span stopped, with its `getstat` counters) in `closeLocally`,
+  before the handler stops. `handleClose:` still runs from `terminate:`,
+  but gets an already-closed socket. `handler.ex` closes in `terminate/2`,
+  after `handle_close/2`, which on a `Connection: close` exchange often
+  lets the client close first and leaves the TIME_WAIT on a client
+  ephemeral port (Buccaneer `churn_close_w32`: ~13,000 client-side
+  TIME_WAIT against cowboy's ~4,200, plus `eaddrnotavail`). Timeouts,
+  shutdown, peer closes and errors still close in `terminate:`.
 - A handler monitors the acceptor that started it (`#acceptor` in its start
   args) until the ready message arrives, and stops with `{shutdown,
   acceptor_down}` if the acceptor dies first. Thousand Island's handler

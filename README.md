@@ -89,6 +89,10 @@ callbacks):
 - Callbacks: `handleConnection:state:`, `handleData:socket:state:`,
   `handleClose:state:`, `handleError:socket:state:`,
   `handleShutdown:state:`, `handleTimeout:state:`, `handleUserInfo:`.
+- On a `close:` result the socket is closed before the handler stops, so
+  `handleClose:state:` gets an already-closed socket (Thousand Island
+  closes after `handle_close/2`). Every other ending closes the socket
+  after its callback.
 - State: `socket` and `userState` (Thousand Island's `{socket, state}`);
   the first `userState` is `handlerOptions`.
 - `handleContinuation: aHandlerResult` re-arms from `handleUserInfo:` or

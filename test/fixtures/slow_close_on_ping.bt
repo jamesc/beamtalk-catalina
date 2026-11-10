@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// `SlowCloseOnPing`: closes on any data. `handleClose:` records whether it
+/// could still send, then takes a second, so a test can tell whether the
+/// socket was closed before it ran or only after it returned (BT-4655).
+RecordingHandler subclass: SlowCloseOnPing
+
+  handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
+    HandlerResult close: st
+
+  handleClose: sock :: Socket state: st :: Object -> Object =>
+    self note: {#sendInClose, (sock send: "late") isOk}
+    Timer sleep: 1000
+    super handleClose: sock state: st

@@ -40,7 +40,9 @@
 /// `handleTimeout:`; the server shutting down → `handleShutdown:`; a peer
 /// close or `close:` → `handleClose:`; a handshake or upgrade failure,
 /// `error:state:`, a socket error or a raised error → `handleError:`. Then
-/// the socket is closed.
+/// the socket is closed. On `close:` the socket is closed first, before the
+/// handler stops, so `handleClose:` gets an already-closed socket there
+/// (a deviation from `handler.ex`, which closes in `terminate/2`).
 ///
 /// A callback that raises crashes the handler (ADR 0134), as in Elixir:
 /// `handleError:` runs with the error as the reason and the supervisor sees
@@ -91,6 +93,9 @@ typed Server subclass: Handler
   // the monitor this handler would wait for it forever.
   state: acceptor :: Pid | Nil = nil
   state: acceptorMonitor :: Reference | Nil = nil
+  // Set once `closeLocally` has closed the socket, so `terminate:` doesn't
+  // close it (and stop its span) a second time.
+  state: socketClosed :: Boolean = false
 
   /// Handlers are never restarted: a connection that ends is gone.
   class supervisionPolicy -> RestartStrategy => #temporary
@@ -113,7 +118,8 @@ typed Server subclass: Handler
   handleData: _data :: Object socket: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st
 
-  /// The peer closed the connection, or a callback answered `close:`.
+  /// The peer closed the connection, or a callback answered `close:`. After
+  /// `close:` the socket is already closed: nothing can be sent on it.
   handleClose: _sock :: Socket state: _st :: Object -> Object => nil
 
   /// The connection failed: `reason` is the transport's bare reason, the
@@ -351,8 +357,14 @@ typed Server subclass: Handler
     // Catalina uses it as the read timeout, as `continue:timeout:` does.
     self continueReading: result
 
+  /// Close the socket now, then stop; `handleClose:` runs from `terminate:`.
+  /// Closing before the stop gets the FIN out ahead of the client's own
+  /// close on a `Connection: close` exchange, so the TIME_WAIT lands here
+  /// rather than on a client ephemeral port (BT-4655).
   closeLocally -> Nil =>
     self cancelReadTimer
+    self close: self.socket reason: #local_closed
+    self.socketClosed := true
     self stopWith: {#shutdown, #local_closed}
     nil
 
@@ -471,8 +483,8 @@ typed Server subclass: Handler
     ]
     nil
 
-  /// Run the closing callback, then close the socket. The callback's answer
-  /// is ignored.
+  /// Run the closing callback, then close the socket unless `closeLocally`
+  /// already has. The callback's answer is ignored.
   end: sock :: Socket with: closeReason :: Object callback: which :: #timeout | #shutdown | #close | #error reason: reason :: Object -> Nil =>
     st := self.userState
     which match: [
@@ -484,7 +496,8 @@ typed Server subclass: Handler
         socket: sock
         state: st
     ]
-    self close: sock reason: closeReason
+    self.socketClosed ifFalse: [self close: sock reason: closeReason]
+    nil
 
   /// Close the socket and stop the connection span with the `getstat`
   /// counters and, unless `closeReason` is a clean one, `#error`
