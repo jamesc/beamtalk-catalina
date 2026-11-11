@@ -3,7 +3,7 @@
 
 [package]
 name = "catalina"
-version = "0.2.3"
+version = "0.2.4"
 description = "Pure-Beamtalk socket server, a port of Thousand Island"
 
 [dependencies]
