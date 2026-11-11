@@ -336,9 +336,9 @@ typed Server subclass: Handler
 
   continueReading: result :: HandlerResult -> Nil =>
     timeout := result timeout
-    (result persistent and: [
-      timeout notNil
-    ]) ifTrue: [self.socket := self.socket withReadTimeout: timeout]
+    result persistent ifTrue: [
+      timeout ifNotNil: [:ms | self.socket := self.socket withReadTimeout: ms]
+    ]
     self.socket setopts: #({#active, #once})
     self armReadTimer: (timeout ifNil: [self.socket readTimeout])
     next := result then
