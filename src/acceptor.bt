@@ -142,14 +142,14 @@ typed Server subclass: Acceptor
   onAcceptError: reason :: Object -> Nil =>
     reason =:= #closed
       ifTrue: [
-        self.span stopWith: #{#connections => self.count} metadata: #{}
+        _ := self.span stopWith: #{#connections => self.count} metadata: #{}
         self stop
         ^nil
       ]
     (reason isKindOf: Symbol) ifFalse: [^self unexpected: reason]
     (#(#econnaborted, #einval) includes: reason)
       ifTrue: [
-        self.span
+        _ := self.span
           event: reason
           measurements: #{}
           metadata: #{}
@@ -157,7 +157,7 @@ typed Server subclass: Acceptor
       ]
     (Acceptor transientErrors includes: reason)
       ifTrue: [
-        self.span
+        _ := self.span
           event: #accept_error
           measurements: #{#error => reason}
           metadata: #{}
@@ -165,7 +165,7 @@ typed Server subclass: Acceptor
       ]
     (#(#emfile, #enfile) includes: reason)
       ifTrue: [
-        self.span
+        _ := self.span
           event: #emfile
           measurements: #{#error => reason}
           metadata: #{}
@@ -176,7 +176,7 @@ typed Server subclass: Acceptor
 
   /// Anything else is a fault: crash, so the supervisor restarts us.
   unexpected: reason :: Object -> Nil =>
-    self.span stopWith: #{
+    _ := self.span stopWith: #{
       #connections => self.count
     } metadata: #{#error => reason}
     Error signal: "Unexpected error in accept: " ++ reason printString
