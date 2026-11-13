@@ -107,7 +107,7 @@ TestCase subclass: TelemetryTest
     self deny: span enabled
     self assert: span handler equals: TelemetryTest
     self assert: (self isReference: span telemetrySpanContext)
-    span
+    _ := span
       event: #ready
       measurements: #{}
       metadata: #{}
@@ -115,11 +115,11 @@ TestCase subclass: TelemetryTest
       untimedEvent: #recv
       measurements: #{}
       metadata: #{}
-    span
+    _ := span
       exceptionKind: #error
       reason: #nope
       stacktrace: #()
-    span stop
+    _ := span stop
     self assert: self connectionEventNames equals: #()
     sock := Socket
       wrap: {#unused}
