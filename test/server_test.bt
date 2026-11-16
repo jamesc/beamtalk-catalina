@@ -149,6 +149,25 @@ TestCase subclass: ServerTest
     self assert: (result error printString includesSubstring: "eaddrinuse")
     TCPTransport close: ls
 
+  testAnAcceptorStartedAfterTheListenerStoppedEndsNormally =>
+    // BT-4848: an acceptor that attaches once the listener has stopped (it
+    // was spawned just before `stop`) has no socket to accept on. It must
+    // end normally; crashing restarts it into the same failure until its
+    // AcceptorSupervisor gives up and exits, taking the handle with it.
+    srv := self start: #{#handler => EchoHandler, #numAcceptors => 1}
+    srv listener unwrap stop
+    accSup := srv acceptorSupervisors first
+    20 timesRepeat: [
+      accSup whichChildren last status =:= #stopped ifFalse: [Timer sleep: 10]
+    ]
+    self assert: accSup whichChildren last status equals: #stopped
+    self assert: (srv restart: accSup child: #acceptor) isOk
+    20 timesRepeat: [
+      accSup whichChildren last status =:= #stopped ifFalse: [Timer sleep: 10]
+    ]
+    self assert: accSup whichChildren last status equals: #stopped
+    srv stop
+
   testStoppingTheListenerEndsTheAcceptorsNormally =>
     // What the shutdown listener does first on shutdown: with the listen
     // socket closed, each #transient acceptor exits normally and stays down,

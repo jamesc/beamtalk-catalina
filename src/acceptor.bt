@@ -71,18 +71,41 @@ typed Server subclass: Acceptor
     self continueWith: #attach
     nil
 
+  /// Acquires the listen socket and starts accepting. The listener can stop
+  /// between this acceptor's spawn and now (`Listener stop` right after
+  /// start, or a restart after `suspend`): with no listen socket there is
+  /// nothing to accept on, so the acceptor ends normally, as it does when
+  /// the socket closes under it, and stays down (it is `#transient`).
+  /// Crashing here instead restarts it into the same failure until the
+  /// `AcceptorSupervisor` gives up and takes the whole acceptor tree with it.
   attach -> Nil =>
+    acquired := Result tryDo: [self acquire]
+    acquired isError
+      ifTrue: [
+        self.server listener isError
+          ifTrue: [
+            self stop
+            ^nil
+          ]
+        acquired unwrap
+        ^nil
+      ]
+    self acceptNext
+
+  /// The fallible part of `attach`: everything that needs the listener.
+  acquire -> Nil =>
     listener := self.server listener unwrap
     // `childWithId:` answers Object; `#connections` is a ConnectionSupervisor.
     sup :: ConnectionSupervisor := (self.parent childWithId: #connections) unwrap
     self.connections := sup
     patient := listener withTimeout: 15000
-    self.listenSocket := patient acceptorInfo: self.id
-    parentSpan := patient listenerSpan
-    self.span := parentSpan startChild: #acceptor
+    got := Result tryDo: [{patient acceptorInfo: self.id, patient listenerSpan}]
     patient stop
+    {socket, parentSpan} := got unwrap
+    self.listenSocket := socket
+    self.span := parentSpan startChild: #acceptor
     self.handlerConfig := HandlerConfig fromServerConfig: self.config
-    self acceptNext
+    nil
 
   handleInfo: msg :: Object -> Nil =>
     msg match: [
