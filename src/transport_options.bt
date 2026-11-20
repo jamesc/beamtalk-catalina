@@ -31,11 +31,11 @@ type TransportOption = Symbol | Tuple
 sealed typed Object subclass: TransportOptions
 
   /// Options Catalina needs and the user cannot override.
-  class sealed requiredOptions -> List(TransportOption) =>
+  class requiredOptions -> List(TransportOption) =>
     #({#mode, #binary}, {#active, false})
 
   /// Defaults the user can override.
-  class sealed defaultOptions -> List(TransportOption) =>
+  class defaultOptions -> List(TransportOption) =>
     #({#backlog, 1024}, {#send_timeout, 30000}, {#send_timeout_close, true}, {#reuseaddr, true})
 
   // Untyped FFI by design: `deep_unwrap_strings/1` has no stub, and its
@@ -49,14 +49,14 @@ sealed typed Object subclass: TransportOptions
   /// through here at the FFI call site. Anything that is not a String
   /// passes through untouched.
   @expect type
-  class sealed unwrapStrings: options :: List(Object) -> List(Object) =>
+  class unwrapStrings: options :: List(Object) -> List(Object) =>
     (Erlang beamtalk_primitive) deep_unwrap_strings: options
 
   /// Send data as stock iodata (BT-4173): a String, a Binary, or a list of
   /// them nested any depth. The proxy unwraps a top-level String but not
   /// one inside a list, which `gen_tcp:send`/`ssl:send` reject (`einval`).
   @expect type
-  class sealed unwrapData: data :: Object -> Object =>
+  class unwrapData: data :: Object -> Object =>
     (Erlang beamtalk_primitive) deep_unwrap_strings: data
 
   /// Required, then user, then default options, first one per key wins.
@@ -74,7 +74,7 @@ sealed typed Object subclass: TransportOptions
   /// - `{#nodelay, true}` (default for IP sockets) — disable Nagle; left out for Unix domain sockets.
   /// - Anything else passes through to `gen_tcp:listen/2` or `ssl:listen/2`
   ///   (`{#certfile, path}`, `{#ip, address}`, `#inet6`, `{#local, path}`, ...).
-  class sealed resolveOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
+  class resolveOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
     all := self requiredOptions
       ++ userOptions
       ++ (self defaultNodelayOptions: userOptions)
@@ -82,18 +82,18 @@ sealed typed Object subclass: TransportOptions
     all withoutDuplicatesBy: [:option | self keyOf: option]
 
   /// `{#nodelay, true}`, unless the socket is a Unix domain socket.
-  class sealed defaultNodelayOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
+  class defaultNodelayOptions: userOptions :: List(TransportOption) -> List(TransportOption) =>
     ((self isLocal: (Erlang proplists get_value: #ip with: userOptions)) or: [
       self isLocal: (Erlang proplists get_value: #ifaddr with: userOptions)
     ]) ifTrue: [#()] ifFalse: [#({#nodelay, true})]
 
   /// Whether an `ip`/`ifaddr` value is a Unix domain address.
-  class sealed isLocal: address :: Object -> Boolean =>
+  class isLocal: address :: Object -> Boolean =>
     address match: [
       {#local, _} -> true;
       _ -> false
     ]
 
   /// The key an option is deduplicated by.
-  class sealed keyOf: option :: Object -> Object =>
+  class keyOf: option :: Object -> Object =>
     (option isKindOf: Tuple) ifTrue: [option at: 1] ifFalse: [option]

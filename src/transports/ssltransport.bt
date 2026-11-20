@@ -32,19 +32,19 @@
 sealed typed Object subclass: SSLTransport
 
   /// Options any one of which supplies the private key.
-  class sealed keyOptions -> List(Symbol) =>
+  class keyOptions -> List(Symbol) =>
     #(#certs_keys, #keyfile, #key, #sni_hosts, #sni_fun)
 
   /// Options any one of which supplies the certificate.
-  class sealed certOptions -> List(Symbol) =>
+  class certOptions -> List(Symbol) =>
     #(#certs_keys, #certfile, #cert, #sni_hosts, #sni_fun)
 
   /// How much of a file `sendfile:...` reads and sends at a time.
-  class sealed sendfileChunkSize -> Integer => 1048576
+  class sendfileChunkSize -> Integer => 1048576
 
   /// Open a TLS listen socket with the resolved options. Raises unless the
   /// options supply a key and a certificate.
-  class sealed listen: port :: Integer options: userOptions :: List(Symbol | Tuple) -> Result(Port | Tuple, Object) =>
+  class listen: port :: Integer options: userOptions :: List(Symbol | Tuple) -> Result(Port | Tuple, Object) =>
     resolved := TransportOptions resolveOptions: userOptions
     (self defines: self keyOptions in: resolved)
       ifFalse: [
@@ -58,38 +58,38 @@ sealed typed Object subclass: SSLTransport
     TransportResult bare: ((Erlang ssl) listen: port with: (TransportOptions unwrapStrings: resolved))
 
   /// Whether `options` defines any of `keys`.
-  class sealed defines: keys :: List(Symbol) in: options :: List(Object) -> Boolean =>
+  class defines: keys :: List(Symbol) in: options :: List(Object) -> Boolean =>
     keys anySatisfy: [:key |
       (Erlang proplists is_defined: key with: options) =:= true
     ]
 
   /// Start the `ssl` application if it is not running.
-  class sealed ensureStarted -> Nil =>
+  class ensureStarted -> Nil =>
     Erlang application ensure_all_started: #ssl
     nil
 
   /// Wait for a client's TCP connection. The TLS handshake comes later, in
   /// the handler.
-  class sealed accept: listenSocket :: Object -> Result(Port | Tuple, Object) =>
+  class accept: listenSocket :: Object -> Result(Port | Tuple, Object) =>
     TransportResult bare: ((Erlang ssl) transport_accept: listenSocket)
 
   /// The TLS handshake, with no time limit.
-  class sealed handshake: socket :: Object -> Result(Port | Tuple, Object) =>
+  class handshake: socket :: Object -> Result(Port | Tuple, Object) =>
     self handshake: socket timeout: #infinity
 
   /// The TLS handshake, bounded by `timeout` ms (or `#infinity`).
-  class sealed handshake: socket :: Object timeout: timeout :: Object -> Result(Port | Tuple, Object) =>
+  class handshake: socket :: Object timeout: timeout :: Object -> Result(Port | Tuple, Object) =>
     self handshaken: ((Erlang ssl) handshake: socket with: timeout)
 
   /// Upgrade an accepted clear-TCP socket to TLS with server `options`.
-  class sealed upgrade: socket :: Object options: options :: Object -> Result(Port | Tuple, Object) =>
+  class upgrade: socket :: Object options: options :: Object -> Result(Port | Tuple, Object) =>
     self ensureStarted
     opts :: List(Object) := options
     self handshaken: ((Erlang ssl) handshake: socket with: (TransportOptions unwrapStrings: opts))
 
   /// `ssl:handshake/2`'s answer as a `Result`. Its `{ok, Socket, Extensions}`
   /// form is a 3-tuple, which the FFI boundary leaves alone (ADR 0076).
-  class sealed handshaken: answer :: Object -> Result(Port | Tuple, Object) =>
+  class handshaken: answer :: Object -> Result(Port | Tuple, Object) =>
     (answer isKindOf: Result) ifTrue: [^TransportResult bare: answer]
     answer match: [
       {#ok, socket, _extensions} -> Result ok: socket;
@@ -97,11 +97,11 @@ sealed typed Object subclass: SSLTransport
     ]
 
   /// Make `pid` the socket's owner.
-  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result(Nil, Object) =>
+  class controllingProcess: socket :: Object pid: pid :: Pid -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang ssl) controlling_process: socket with: pid)
 
   /// Read up to `length` bytes (0: whatever is available).
-  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result(Binary, Object) =>
+  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result(Binary, Object) =>
     TransportResult
       bare: ((Erlang ssl)
         recv: socket
@@ -109,12 +109,12 @@ sealed typed Object subclass: SSLTransport
         with: timeout)
 
   /// Send a String or iodata.
-  class sealed send: socket :: Object data: data :: Object -> Result(Nil, Object) =>
+  class send: socket :: Object data: data :: Object -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang ssl) send: socket with: (TransportOptions unwrapData: data))
 
   /// Send `length` bytes of a file from `offset` (0: to the end), in
   /// `sendfileChunkSize` chunks, and answer the bytes sent.
-  class sealed sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
+  class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
     opened := TransportResult bare: ((Erlang file) open: filename with: #(#read, #raw, #binary))
     opened isError ifTrue: [^opened]
     fd := opened value
@@ -126,7 +126,7 @@ sealed typed Object subclass: SSLTransport
         length: length
     ] ensure: [(Erlang file) close: fd]
 
-  class sealed sendChunksOf: fd :: Object to: socket :: Object from: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
+  class sendChunksOf: fd :: Object to: socket :: Object from: offset :: Integer length: length :: Integer -> Result(Integer, Object) =>
     sent := 0
     done := false
     failure := nil
@@ -170,42 +170,42 @@ sealed typed Object subclass: SSLTransport
     failure isNil ifTrue: [Result ok: sent] ifFalse: [Result error: failure]
 
   /// Read socket options.
-  class sealed getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object) =>
+  class getopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(List(Symbol | Tuple), Object) =>
     TransportResult bare: ((Erlang ssl) getopts: socket with: options)
 
   /// Set socket options.
-  class sealed setopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(Nil, Object) =>
+  class setopts: socket :: Object options: options :: List(Symbol | Tuple) -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang ssl) setopts: socket with: options)
 
   /// Shut the connection down in one direction.
-  class sealed shutdown: socket :: Object how: way :: Symbol -> Result(Nil, Object) =>
+  class shutdown: socket :: Object how: way :: Symbol -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang ssl) shutdown: socket with: way)
 
   /// Close a connection or listen socket.
-  class sealed close: socket :: Object -> Result(Nil, Object) =>
+  class close: socket :: Object -> Result(Nil, Object) =>
     TransportResult bare: ((Erlang ssl) close: socket)
 
   /// The local `{ip, port}`.
-  class sealed sockname: socket :: Object -> Result(SocketAddress, Object) =>
+  class sockname: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang ssl) sockname: socket)
 
   /// The remote `{ip, port}`.
-  class sealed peername: socket :: Object -> Result(SocketAddress, Object) =>
+  class peername: socket :: Object -> Result(SocketAddress, Object) =>
     TransportResult bare: ((Erlang ssl) peername: socket)
 
   /// The peer's DER certificate, or `Result error: #no_peercert`.
-  class sealed peercert: socket :: Object -> Result(Binary, Object) =>
+  class peercert: socket :: Object -> Result(Binary, Object) =>
     TransportResult bare: ((Erlang ssl) peercert: socket)
 
   /// TLS is secure.
-  class sealed isSecure -> Boolean => true
+  class isSecure -> Boolean => true
 
   /// The socket's counters.
-  class sealed getstat: socket :: Object -> Result(List(Tuple(Symbol, Integer)), Object) =>
+  class getstat: socket :: Object -> Result(List(Tuple(Symbol, Integer)), Object) =>
     TransportResult bare: ((Erlang ssl) getstat: socket)
 
   /// The ALPN protocol, or `Result error: #protocol_not_negotiated`.
-  class sealed negotiatedProtocol: socket :: Object -> Result(String, Object) =>
+  class negotiatedProtocol: socket :: Object -> Result(String, Object) =>
     // BT-4173: the ALPN id is text (IANA-registered ASCII) — answer a
     // String, not the socket's bytes.
     answer := TransportResult bare: ((Erlang ssl) negotiated_protocol: socket)
@@ -214,5 +214,5 @@ sealed typed Object subclass: SSLTransport
     Result ok: bytes asStringUnchecked
 
   /// `ssl:connection_information/1`: protocol, cipher suite and so on.
-  class sealed connectionInformation: socket :: Object -> Result(List(Tuple), Object) =>
+  class connectionInformation: socket :: Object -> Result(List(Tuple), Object) =>
     TransportResult bare: ((Erlang ssl) connection_information: socket)

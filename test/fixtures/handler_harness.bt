@@ -12,7 +12,7 @@ sealed typed Object subclass: HandlerHarness
   /// names one), merging `options` into the
   /// server options and `#table => name` into `handlerOptions`, and answer
   /// it. `stopAll:` stops it with the test's other servers.
-  class sealed startServer: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> ServerSupervisor =>
+  class startServer: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> ServerSupervisor =>
     withPort := (options includesKey: #port) ifTrue: [
       options
     ] ifFalse: [options at: #port put: 0]
@@ -26,7 +26,7 @@ sealed typed Object subclass: HandlerHarness
 
   /// Start a server as `startServer:` does, and answer its port. Only for
   /// IP servers: a Unix domain socket server has no port.
-  class sealed start: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> Integer =>
+  class start: handler :: Handler class options: options :: Dictionary table: name :: Symbol -> Integer =>
     srv := self
       startServer: handler
       options: options
@@ -35,11 +35,11 @@ sealed typed Object subclass: HandlerHarness
     port
 
   /// The server started last.
-  class sealed serverIn: name :: Symbol -> ServerSupervisor =>
+  class serverIn: name :: Symbol -> ServerSupervisor =>
     ((Ets named: name) at: #servers) last
 
   /// Stop every server still running.
-  class sealed stopAll: name :: Symbol -> Nil =>
+  class stopAll: name :: Symbol -> Nil =>
     servers :: List(ServerSupervisor) := (Ets named: name) at: #servers ifAbsent: [
       #()
     ]
@@ -47,28 +47,28 @@ sealed typed Object subclass: HandlerHarness
     nil
 
   /// The events logged so far.
-  class sealed logIn: name :: Symbol -> List(Object) =>
+  class logIn: name :: Symbol -> List(Object) =>
     (Ets named: name) at: #log ifAbsent: [#()]
 
   /// Wait up to three seconds for `event` to be logged.
-  class sealed await: event :: Object in: name :: Symbol -> Boolean =>
+  class await: event :: Object in: name :: Symbol -> Boolean =>
     300 timesRepeat: [
       ((self logIn: name) includes: event) ifFalse: [Timer sleep: 10]
     ]
     (self logIn: name) includes: event
 
   /// The first logged `{tag, ...}` tuple, waiting up to three seconds for one.
-  class sealed entry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
+  class entry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
     300 timesRepeat: [
       (self findEntry: tag in: name) isNil ifTrue: [Timer sleep: 10]
     ]
     self findEntry: tag in: name
 
-  class sealed findEntry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
+  class findEntry: tag :: Symbol in: name :: Symbol -> Tuple | Nil =>
     (self entries: tag in: name) detect: [:t | true] ifNone: [nil]
 
   /// Every logged `{tag, ...}` tuple, in order.
-  class sealed entries: tag :: Symbol in: name :: Symbol -> List(Tuple) =>
+  class entries: tag :: Symbol in: name :: Symbol -> List(Tuple) =>
     tuples :: List(Tuple) := (self logIn: name) select: [:e | e isKindOf: Tuple]
     tuples select: [:t | (t at: 1) =:= tag]
 
@@ -76,15 +76,15 @@ sealed typed Object subclass: HandlerHarness
 
   /// The server's options for `SSLTransport` with the test certificate,
   /// preferring the ALPN protocol "foo".
-  class sealed tlsServerOptions -> List =>
+  class tlsServerOptions -> List =>
     #({#certfile, "test/fixtures/cert.pem"}, {#keyfile, "test/fixtures/key.pem"}, {#alpn_preferred_protocols, #("foo")})
 
   /// A verifying client: it trusts the test CA.
-  class sealed tlsClientOptions -> List =>
+  class tlsClientOptions -> List =>
     #(#binary, {#active, false}, {#verify, #verify_peer}, {#cacertfile, "test/fixtures/ca.pem"})
 
   /// Connect a TLS client to `port` on 127.0.0.1 with `extra` options too.
-  class sealed tlsConnect: port :: Integer options: extra :: List -> Result =>
+  class tlsConnect: port :: Integer options: extra :: List -> Result =>
     Erlang application ensure_all_started: #ssl
     // `ssl:connect/4` may answer `{ok, Socket, Extensions}`, as `handshake` does.
     SSLTransport
@@ -95,7 +95,7 @@ sealed typed Object subclass: HandlerHarness
         with: 5000)
 
   /// Start TLS on an already connected clear-TCP client socket.
-  class sealed startTLS: tcpSocket :: Object -> Result =>
+  class startTLS: tcpSocket :: Object -> Result =>
     Erlang application ensure_all_started: #ssl
     SSLTransport
       handshaken: ((Erlang ssl)
@@ -104,7 +104,7 @@ sealed typed Object subclass: HandlerHarness
         with: 5000)
 
   /// The next data on a TLS client within `ms`, or the bare error.
-  class sealed tlsRecv: client :: Object within: ms :: Integer -> Object =>
+  class tlsRecv: client :: Object within: ms :: Integer -> Object =>
     result := SSLTransport
       recv: client
       length: 0
@@ -115,7 +115,7 @@ sealed typed Object subclass: HandlerHarness
   /// from the tests, so unchecked conversion is exact — and it stays a
   /// String across the BT-4170 flip, where `text :: String := data`
   /// would fail on Binary data.
-  class sealed textOf: data :: Object -> String =>
+  class textOf: data :: Object -> String =>
     (data isKindOf: String) ifTrue: [^data]
     (data isKindOf: Binary) ifTrue: [^data asStringUnchecked]
     Error signal: ("expected socket bytes, got: " ++ data printString)

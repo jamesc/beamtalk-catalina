@@ -11,7 +11,7 @@ sealed typed Object subclass: CatalinaNode
   /// harness's own: `#handler` is `#echo` or `#slowEcho` (a Symbol, not a
   /// class) and `#tls` is a Boolean selecting `SSLTransport`. Raises if the
   /// server cannot start.
-  class sealed start: options :: Dictionary -> ServerSupervisor =>
+  class start: options :: Dictionary -> ServerSupervisor =>
     kind := options at: #handler ifAbsent: [#echo]
     handler := kind =:= #slowEcho ifTrue: [SlowEcho] ifFalse: [BenchEcho]
     tls := (options at: #tls ifAbsent: [false]) =:= true

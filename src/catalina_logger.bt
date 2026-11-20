@@ -25,10 +25,10 @@
 sealed typed Object subclass: CatalinaLogger
 
   /// Every level, most severe first.
-  class sealed levels -> List(Symbol) => #(#error, #info, #debug, #trace)
+  class levels -> List(Symbol) => #(#error, #info, #debug, #trace)
 
   /// The events logged at exactly `level`.
-  class sealed eventsAt: level :: Symbol -> List(List(Symbol)) =>
+  class eventsAt: level :: Symbol -> List(List(Symbol)) =>
     level match: [
       #error -> #(#(#catalina, #acceptor, #spawn_error), #(#catalina, #acceptor, #econnaborted), #(#catalina, #acceptor, #accept_error), #(#catalina, #acceptor, #emfile));
       #info -> #(#(#catalina, #listener, #start), #(#catalina, #listener, #stop));
@@ -37,13 +37,13 @@ sealed typed Object subclass: CatalinaLogger
     ]
 
   /// The `telemetry` handler id for `level`.
-  class sealed handlerId: level :: Symbol -> String =>
+  class handlerId: level :: Symbol -> String =>
     "CatalinaLogger." ++ level asString
 
   /// Log `level` and every level above it. `Result error:` (kind
   /// `#handler_exists`) if `level` itself is already attached; a level
   /// above it that is already attached is left as it is.
-  class sealed attach: level :: #error | #info | #debug | #trace -> Result(Nil, Error) =>
+  class attach: level :: #error | #info | #debug | #trace -> Result(Nil, Error) =>
     result := Result ok: nil
     self levels
       do: [:each |
@@ -56,7 +56,7 @@ sealed typed Object subclass: CatalinaLogger
     result
 
   /// Stop logging `level` and every level below it. Idempotent.
-  class sealed detach: level :: #error | #info | #debug | #trace -> Nil =>
+  class detach: level :: #error | #info | #debug | #trace -> Nil =>
     self levels
       do: [:each |
         (self index: each) >= (self index: level) ifTrue: [
@@ -66,10 +66,10 @@ sealed typed Object subclass: CatalinaLogger
     nil
 
   /// `level`'s position in `levels` (0 if it is not one).
-  class sealed index: level :: Symbol -> Integer =>
+  class index: level :: Symbol -> Integer =>
     (self levels indexOf: level) ifNil: [0]
 
-  class sealed attachExactly: level :: Symbol -> Result(Nil, Error) =>
+  class attachExactly: level :: Symbol -> Result(Nil, Error) =>
     Telemetry
       attach: (self handlerId: level)
       toAll: (self eventsAt: level)

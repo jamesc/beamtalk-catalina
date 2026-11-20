@@ -47,7 +47,7 @@ sealed typed Value subclass: Socket
 
   /// A Socket over an accepted raw socket, with the handler settings from
   /// `handlerConfig` and the connection's telemetry `span`.
-  class sealed wrap: rawSocket :: Port | Tuple peername: peer :: SocketAddress | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
+  class wrap: rawSocket :: Port | Tuple peername: peer :: SocketAddress | Nil handlerConfig: handlerConfig :: HandlerConfig span: span :: CatalinaTelemetry | Nil -> Socket =>
     Socket
       socket: rawSocket
       transport: handlerConfig transport

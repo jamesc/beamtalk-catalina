@@ -42,54 +42,53 @@ sealed typed Value subclass: HandlerResult
   field: reason :: Object = nil
 
   /// Keep reading, with the socket's read timeout.
-  class sealed continue: st :: Object -> HandlerResult =>
+  class continue: st :: Object -> HandlerResult =>
     self kind: #continue state: st
 
   /// Keep reading, timing out after `ms` this time only.
-  class sealed continue: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
+  class continue: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
     (self kind: #continue state: st) withTimeout: ms
 
   /// Keep reading, and make `ms` the socket's read timeout from now on.
-  class sealed continue: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
+  class continue: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
     ((self kind: #continue state: st) withTimeout: ms) withPersistent: true
 
   /// Keep reading, and run the unary method `selector` next.
-  class sealed continue: st :: Object then: selector :: Symbol -> HandlerResult =>
+  class continue: st :: Object then: selector :: Symbol -> HandlerResult =>
     (self kind: #continue state: st) withThen: selector
 
   /// Upgrade the connection to `transport` (TLS, say), then keep reading.
-  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object -> HandlerResult =>
+  class switchTransport: transport :: Object options: options :: Object state: st :: Object -> HandlerResult =>
     ((self kind: #switchTransport state: st) withTransport: transport) withOptions: options
 
   /// As `switchTransport:options:state:`, timing out after `ms` this time only.
-  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
+  class switchTransport: transport :: Object options: options :: Object state: st :: Object timeout: ms :: Integer | #infinity -> HandlerResult =>
     (self
       switchTransport: transport
       options: options
       state: st) withTimeout: ms
 
   /// As `switchTransport:options:state:`, making `ms` the read timeout from now on.
-  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
+  class switchTransport: transport :: Object options: options :: Object state: st :: Object persistentTimeout: ms :: Integer | #infinity -> HandlerResult =>
     ((self
       switchTransport: transport
       options: options
       state: st) withTimeout: ms) withPersistent: true
 
   /// As `switchTransport:options:state:`, then run the unary method `selector`.
-  class sealed switchTransport: transport :: Object options: options :: Object state: st :: Object then: selector :: Symbol -> HandlerResult =>
+  class switchTransport: transport :: Object options: options :: Object state: st :: Object then: selector :: Symbol -> HandlerResult =>
     (self
       switchTransport: transport
       options: options
       state: st) withThen: selector
 
   /// Close the connection (`handleClose:state:` runs).
-  class sealed close: st :: Object -> HandlerResult =>
-    self kind: #close state: st
+  class close: st :: Object -> HandlerResult => self kind: #close state: st
 
   /// Close the connection with an error (`handleError:socket:state:` runs).
   /// `#timeout` is a read timeout (`handleTimeout:state:` runs instead).
-  class sealed error: reason :: Object state: st :: Object -> HandlerResult =>
+  class error: reason :: Object state: st :: Object -> HandlerResult =>
     (self kind: #error state: st) withReason: reason
 
-  class sealed kind: kind :: #continue | #switchTransport | #close | #error state: st :: Object -> HandlerResult =>
+  class kind: kind :: #continue | #switchTransport | #close | #error state: st :: Object -> HandlerResult =>
     self new: #{#kind => kind, #state => st}

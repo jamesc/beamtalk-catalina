@@ -6,16 +6,14 @@
 /// in a persistent term.
 sealed typed Object subclass: RecordingTransport
 
-  class sealed listen: port :: Integer options: _options :: List -> Result =>
+  class listen: port :: Integer options: _options :: List -> Result =>
     Erlang persistent_term put: #catalinaRecordingTransport with: port
     (Erlang gen_tcp) listen: port with: #(#binary, {#active, false})
 
-  class sealed sockname: socket :: Object -> Result =>
-    (Erlang inet) sockname: socket
+  class sockname: socket :: Object -> Result => (Erlang inet) sockname: socket
 
-  class sealed close: socket :: Object -> Result =>
-    (Erlang gen_tcp) close: socket
+  class close: socket :: Object -> Result => (Erlang gen_tcp) close: socket
 
   /// The port of the last `listen:options:`.
-  class sealed lastPort -> Object =>
+  class lastPort -> Object =>
     Erlang persistent_term get: #catalinaRecordingTransport with: nil

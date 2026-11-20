@@ -7,64 +7,59 @@
 /// else delegates to `TCPTransport`. From `socket_test.exs`.
 sealed typed Object subclass: LegacyTransport
 
-  class sealed listen: port :: Integer options: options :: List -> Result =>
+  class listen: port :: Integer options: options :: List -> Result =>
     TCPTransport listen: port options: options
 
-  class sealed accept: listenSocket :: Object -> Result =>
+  class accept: listenSocket :: Object -> Result =>
     TCPTransport accept: listenSocket
 
-  class sealed handshake: socket :: Object -> Result =>
-    Result ok: {#legacy, socket}
+  class handshake: socket :: Object -> Result => Result ok: {#legacy, socket}
 
-  class sealed upgrade: socket :: Object options: options :: Object -> Result =>
+  class upgrade: socket :: Object options: options :: Object -> Result =>
     TCPTransport upgrade: socket options: options
 
-  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
+  class controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
     TCPTransport controllingProcess: socket pid: pid
 
-  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
+  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
     TCPTransport
       recv: socket
       length: length
       timeout: timeout
 
-  class sealed send: socket :: Object data: data :: Object -> Result =>
+  class send: socket :: Object data: data :: Object -> Result =>
     TCPTransport send: socket data: data
 
-  class sealed sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result =>
+  class sendfile: socket :: Object filename: filename :: String offset: offset :: Integer length: length :: Integer -> Result =>
     TCPTransport
       sendfile: socket
       filename: filename
       offset: offset
       length: length
 
-  class sealed getopts: socket :: Object options: options :: List -> Result =>
+  class getopts: socket :: Object options: options :: List -> Result =>
     TCPTransport getopts: socket options: options
 
-  class sealed setopts: socket :: Object options: options :: List -> Result =>
+  class setopts: socket :: Object options: options :: List -> Result =>
     TCPTransport setopts: socket options: options
 
-  class sealed shutdown: socket :: Object how: way :: Symbol -> Result =>
+  class shutdown: socket :: Object how: way :: Symbol -> Result =>
     TCPTransport shutdown: socket how: way
 
-  class sealed close: socket :: Object -> Result => TCPTransport close: socket
+  class close: socket :: Object -> Result => TCPTransport close: socket
 
-  class sealed sockname: socket :: Object -> Result =>
-    TCPTransport sockname: socket
+  class sockname: socket :: Object -> Result => TCPTransport sockname: socket
 
-  class sealed peername: socket :: Object -> Result =>
-    TCPTransport peername: socket
+  class peername: socket :: Object -> Result => TCPTransport peername: socket
 
-  class sealed peercert: socket :: Object -> Result =>
-    TCPTransport peercert: socket
+  class peercert: socket :: Object -> Result => TCPTransport peercert: socket
 
-  class sealed isSecure -> Boolean => TCPTransport isSecure
+  class isSecure -> Boolean => TCPTransport isSecure
 
-  class sealed getstat: socket :: Object -> Result =>
-    TCPTransport getstat: socket
+  class getstat: socket :: Object -> Result => TCPTransport getstat: socket
 
-  class sealed negotiatedProtocol: socket :: Object -> Result =>
+  class negotiatedProtocol: socket :: Object -> Result =>
     TCPTransport negotiatedProtocol: socket
 
-  class sealed connectionInformation: socket :: Object -> Result =>
+  class connectionInformation: socket :: Object -> Result =>
     TCPTransport connectionInformation: socket
