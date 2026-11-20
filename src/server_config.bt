@@ -81,7 +81,7 @@ sealed typed Value subclass: ServerConfig
   /// config := ServerConfig fromOptions: #{#port => 0, #handler => Object}
   /// config numAcceptors   // => 100
   /// ```
-  class sealed fromOptions: options :: ServerOptions -> ServerConfig =>
+  class fromOptions: options :: ServerOptions -> ServerConfig =>
     self validateKeys: options
     config := self new: (self normaliseOptions: options)
     self validateHandler: config
@@ -92,12 +92,12 @@ sealed typed Value subclass: ServerConfig
   /// The option names `fromOptions:` accepts, as Bandit reads
   /// `ThousandIsland.ServerConfig.__struct__()` to split its options from
   /// Thousand Island's.
-  class sealed optionNames -> List(Symbol) => self new fieldNames
+  class optionNames -> List(Symbol) => self new fieldNames
 
   /// `new:` does not reject undeclared keys at runtime (BT-4030), and an
   /// unknown option is a typo the user should hear about, as Elixir's
   /// `struct!/2` reports it.
-  class sealed validateKeys: options :: ServerOptions -> Nil =>
+  class validateKeys: options :: ServerOptions -> Nil =>
     known := self optionNames
     options keys
       do: [:key |
@@ -110,11 +110,10 @@ sealed typed Value subclass: ServerConfig
   /// The `gen_tcp` and `ssl` listen options that are a bare atom rather
   /// than a `{key, value}` pair (OTP 27 and 28): the `list` or `binary`
   /// mode, and the `inet`, `inet6` or `local` address family.
-  class sealed atomOptions -> List(Symbol) =>
-    #(#binary, #list, #inet, #inet6, #local)
+  class atomOptions -> List(Symbol) => #(#binary, #list, #inet, #inet6, #local)
 
   /// `options` with `transportOptions` and `supervisorOptions` as proplists.
-  class sealed normaliseOptions: options :: ServerOptions -> ServerOptions =>
+  class normaliseOptions: options :: ServerOptions -> ServerOptions =>
     #(#transportOptions, #supervisorOptions)
       inject: options
       into: [:acc :name |
@@ -123,7 +122,7 @@ sealed typed Value subclass: ServerConfig
         ] ifFalse: [acc]
       ]
 
-  class sealed proplist: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
+  class proplist: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
     (value isKindOf: List) ifTrue: [^value]
     (value isKindOf: Dictionary)
       ifFalse: [
@@ -140,7 +139,7 @@ sealed typed Value subclass: ServerConfig
 
   /// The proplist entries for one Dictionary entry: none, a bare atom, or
   /// a `{key, value}` pair.
-  class sealed entry: key :: Object value: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
+  class entry: key :: Object value: value :: Object named: name :: Symbol -> List(Symbol | Tuple) =>
     (key isKindOf: Symbol) ifFalse: [
       Error signal: "{name} keys must be Symbols, got: {key printString}"
     ]
@@ -149,20 +148,20 @@ sealed typed Value subclass: ServerConfig
     value =:= false ifTrue: [^#()]
     Error signal: "{name} option {key printString} must be true or false, got: {value printString}"
 
-  class sealed validateHandler: config :: ServerConfig -> Nil =>
+  class validateHandler: config :: ServerConfig -> Nil =>
     config handler isNil ifTrue: [
       Error signal: "No handler defined in server configuration"
     ]
     nil
 
-  class sealed validateNumSockets: config :: ServerConfig -> Nil =>
+  class validateNumSockets: config :: ServerConfig -> Nil =>
     config numListenSockets > config numAcceptors
       ifTrue: [
         Error signal: "numListenSockets ({config numListenSockets}) must be less than or equal to numAcceptors ({config numAcceptors})"
       ]
     nil
 
-  class sealed validateReuseport: config :: ServerConfig -> Nil =>
+  class validateReuseport: config :: ServerConfig -> Nil =>
     opts := config transportOptions
     reuseport := (Erlang proplists
       get_value: #reuseport

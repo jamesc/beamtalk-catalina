@@ -48,13 +48,13 @@ sealed typed Value subclass: CatalinaTelemetry
   field: enabled :: Boolean = true
 
   /// Native monotonic time, as `telemetry` expects.
-  class sealed monotonicTime -> Integer => Erlang erlang monotonic_time
+  class monotonicTime -> Integer => Erlang erlang monotonic_time
 
   /// Native system time.
-  class sealed systemTime -> Integer => Erlang erlang system_time
+  class systemTime -> Integer => Erlang erlang system_time
 
   /// Emit `[catalina, span, name]`.
-  class sealed emit: span :: Symbol name: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> Nil =>
+  class emit: span :: Symbol name: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> Nil =>
     Telemetry
       execute: ((#(#catalina) add: span) add: name)
       measurements: measurements
@@ -63,7 +63,7 @@ sealed typed Value subclass: CatalinaTelemetry
   /// Start a span: emit its `start` event and answer it. `measurements`
   /// may supply `#monotonic_time` and `#system_time`; otherwise they are
   /// now. `metadata` should name the `#handler`.
-  class sealed startSpan: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
+  class startSpan: name :: Symbol measurements: measurements :: Dictionary(Symbol, Object) metadata: metadata :: Dictionary(Symbol, Object) -> CatalinaTelemetry =>
     timed := (measurements includesKey: #monotonic_time) ifTrue: [
       measurements
     ] ifFalse: [measurements at: #monotonic_time put: self monotonicTime]
@@ -90,12 +90,12 @@ sealed typed Value subclass: CatalinaTelemetry
 
   /// Whether a handler is attached to any `[catalina, connection, ...]`
   /// event. Asked once per connection, when it opens.
-  class sealed connectionsTraced -> Boolean =>
+  class connectionsTraced -> Boolean =>
     Telemetry hasHandlers: #(#catalina, #connection)
 
   /// A silent span named `name`: a child of `parent` (its context and
   /// handler) that emits nothing, for a span nobody listens to.
-  class sealed silent: name :: Symbol parent: parent :: CatalinaTelemetry -> CatalinaTelemetry =>
+  class silent: name :: Symbol parent: parent :: CatalinaTelemetry -> CatalinaTelemetry =>
     CatalinaTelemetry
       spanName: name
       telemetrySpanContext: Reference new

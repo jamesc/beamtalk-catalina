@@ -21,7 +21,7 @@ sealed typed Value subclass: HandlerConfig
   field: silentTerminateOnError :: Boolean = false
 
   /// The handler fields of a server configuration.
-  class sealed fromServerConfig: config :: ServerConfig -> HandlerConfig =>
+  class fromServerConfig: config :: ServerConfig -> HandlerConfig =>
     HandlerConfig
       handler: config handler
       transport: config transport

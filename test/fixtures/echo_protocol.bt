@@ -5,11 +5,11 @@
 /// 30 s read timeout, as Bandit's WebSocket handler sets one.
 sealed typed Object subclass: EchoProtocol
 
-  class sealed handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+  class handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st
 
-  class sealed handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+  class handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
     sock send: data
     HandlerResult continue: st persistentTimeout: 30000
 
-  class sealed describe -> String => "echo"
+  class describe -> String => "echo"

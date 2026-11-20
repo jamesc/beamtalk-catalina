@@ -12,96 +12,91 @@ sealed typed Object subclass: FlakyTransport
 
   /// Errors the next `accept:` calls on the server listening on `port`
   /// answer, in order.
-  class sealed acceptResults: reasons :: List port: port :: Integer -> Nil =>
+  class acceptResults: reasons :: List port: port :: Integer -> Nil =>
     Erlang persistent_term put: {#catalinaFlakyAccept, port} with: reasons
     nil
 
   /// Errors the next `controllingProcess:pid:` calls for connections to
   /// `port` answer, in order.
-  class sealed controllingProcessResults: reasons :: List port: port :: Integer -> Nil =>
+  class controllingProcessResults: reasons :: List port: port :: Integer -> Nil =>
     Erlang persistent_term put: {#catalinaFlakyControllingProcess, port} with: reasons
     nil
 
   /// A port that is free now, so a test can queue errors for a server
   /// before starting it there.
-  class sealed freePort -> Integer =>
+  class freePort -> Integer =>
     listening := ((Erlang gen_tcp) listen: 0 with: #(#binary)) unwrap
     port := ((Erlang inet) port: listening) unwrap
     (Erlang gen_tcp) close: listening
     port
 
   /// Take the next queued error under `key`, or nil.
-  class sealed next: key :: Tuple -> Object =>
+  class next: key :: Tuple -> Object =>
     queue := Erlang persistent_term get: key with: #()
     queue isEmpty ifTrue: [^nil]
     Erlang persistent_term put: key with: queue rest
     queue first
 
   /// The local port of a listen or connected socket.
-  class sealed portOf: socket :: Object -> Integer =>
+  class portOf: socket :: Object -> Integer =>
     {_ip, port} := ((Erlang inet) sockname: socket) unwrap
     port
 
-  class sealed listen: port :: Integer options: _options :: List -> Result =>
+  class listen: port :: Integer options: _options :: List -> Result =>
     (Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true})
 
-  class sealed accept: listenSocket :: Object -> Result =>
+  class accept: listenSocket :: Object -> Result =>
     injected := self next: {#catalinaFlakyAccept, self portOf: listenSocket}
     injected isNil ifTrue: [
       (Erlang gen_tcp) accept: listenSocket
     ] ifFalse: [Result error: injected]
 
-  class sealed controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
+  class controllingProcess: socket :: Object pid: pid :: Pid -> Result =>
     injected := self next: {#catalinaFlakyControllingProcess, self portOf: socket}
     injected isNil ifTrue: [
       (Erlang gen_tcp) controlling_process: socket with: pid
     ] ifFalse: [Result error: injected]
 
-  class sealed handshake: socket :: Object -> Result => Result ok: socket
+  class handshake: socket :: Object -> Result => Result ok: socket
 
-  class sealed upgrade: _socket :: Object options: _options :: Object -> Result =>
+  class upgrade: _socket :: Object options: _options :: Object -> Result =>
     Result error: #unsupported_upgrade
 
-  class sealed recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
+  class recv: socket :: Object length: length :: Integer timeout: timeout :: Object -> Result =>
     (Erlang gen_tcp)
       recv: socket
       with: length
       with: timeout
 
-  class sealed send: socket :: Object data: data :: Object -> Result =>
+  class send: socket :: Object data: data :: Object -> Result =>
     (Erlang gen_tcp) send: socket with: data
 
-  class sealed sendfile: _socket :: Object filename: _filename :: String offset: _offset :: Integer length: _length :: Integer -> Result =>
+  class sendfile: _socket :: Object filename: _filename :: String offset: _offset :: Integer length: _length :: Integer -> Result =>
     Result error: #not_supported
 
-  class sealed getopts: socket :: Object options: options :: List -> Result =>
+  class getopts: socket :: Object options: options :: List -> Result =>
     (Erlang inet) getopts: socket with: options
 
-  class sealed setopts: socket :: Object options: options :: List -> Result =>
+  class setopts: socket :: Object options: options :: List -> Result =>
     (Erlang inet) setopts: socket with: options
 
-  class sealed shutdown: socket :: Object how: way :: Symbol -> Result =>
+  class shutdown: socket :: Object how: way :: Symbol -> Result =>
     (Erlang gen_tcp) shutdown: socket with: way
 
-  class sealed close: socket :: Object -> Result =>
-    (Erlang gen_tcp) close: socket
+  class close: socket :: Object -> Result => (Erlang gen_tcp) close: socket
 
-  class sealed sockname: socket :: Object -> Result =>
-    (Erlang inet) sockname: socket
+  class sockname: socket :: Object -> Result => (Erlang inet) sockname: socket
 
-  class sealed peername: socket :: Object -> Result =>
-    (Erlang inet) peername: socket
+  class peername: socket :: Object -> Result => (Erlang inet) peername: socket
 
-  class sealed peercert: _socket :: Object -> Result =>
-    Result error: #not_secure
+  class peercert: _socket :: Object -> Result => Result error: #not_secure
 
-  class sealed isSecure -> Boolean => false
+  class isSecure -> Boolean => false
 
-  class sealed getstat: socket :: Object -> Result =>
-    (Erlang inet) getstat: socket
+  class getstat: socket :: Object -> Result => (Erlang inet) getstat: socket
 
-  class sealed negotiatedProtocol: _socket :: Object -> Result =>
+  class negotiatedProtocol: _socket :: Object -> Result =>
     Result error: #protocol_not_negotiated
 
-  class sealed connectionInformation: _socket :: Object -> Result =>
+  class connectionInformation: _socket :: Object -> Result =>
     Result error: #not_secure

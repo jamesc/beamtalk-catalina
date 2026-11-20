@@ -6,10 +6,10 @@
 /// and "switch" moves the connection to `EchoProtocol`.
 sealed typed Object subclass: UpperProtocol
 
-  class sealed handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
+  class handleConnection: _sock :: Socket state: st :: Object -> HandlerResult =>
     HandlerResult continue: st
 
-  class sealed handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
+  class handleData: data :: Object socket: sock :: Socket state: st :: Object -> HandlerResult =>
     text := HandlerHarness textOf: data
     options :: Dictionary := st
     (text startsWith: "switch")
@@ -22,4 +22,4 @@ sealed typed Object subclass: UpperProtocol
         HandlerResult continue: st
       ]
 
-  class sealed describe -> String => "upper"
+  class describe -> String => "upper"
