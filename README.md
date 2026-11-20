@@ -113,7 +113,8 @@ and `then:` forms).
 `telemetrySpan`. Errors are bare Erlang reasons (`Result error: #closed`).
 
 **Transports**: `TCPTransport`, `SSLTransport`, and the `Transport`
-protocol for your own (sealed, with `class sealed` methods).
+protocol for your own (a sealed class with no class variables, so its
+class methods run in the caller's process).
 
 **Telemetry**: `telemetry` events `[catalina, listener|acceptor|connection,
 ...]`, with Thousand Island's names, measurements and metadata (see

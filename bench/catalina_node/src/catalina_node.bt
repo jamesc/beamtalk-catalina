@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// CatalinaNode — what the Erlang bench and stress harness
-/// (`bench/harness/bench_node.erl`) calls in a Catalina peer node. Sealed
-/// class methods compile to plain exported functions, so the harness calls
-/// them directly (`'bt@catalina_node@catalina_node':'class_start:'/2`).
+/// (`bench/harness/bench_node.erl`) calls in a Catalina peer node. With no
+/// class variables, its class methods run in the caller and compile to plain
+/// exported functions, so the harness calls them directly
+/// (`'bt@catalina_node@catalina_node':'class_start:'/2`).
 sealed typed Object subclass: CatalinaNode
 
   /// Start a server. `options` are `Catalina start:` options plus two of the

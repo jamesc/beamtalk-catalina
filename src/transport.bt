@@ -18,9 +18,9 @@
 /// #not_secure`). Callers compare the error itself:
 /// `(TCPTransport recv: s length: 0 timeout: 100) error =:= #timeout`.
 ///
-/// **Seal the class and every class method** (`sealed Object subclass:`,
-/// `class sealed`). A class method of an open or stateful class runs in the
-/// class's own process, not the caller's (ADR 0129), and socket calls must
+/// **Declare no class variables** (and seal the class: `sealed Object
+/// subclass:`). A class method of a class with class variables runs in the
+/// class's own process, not the caller's (ADR 0142), and socket calls must
 /// run in the caller: `controllingProcess:pid:` and `sendfile:...` only work
 /// from the socket's owner, and a blocking `accept:` or `recv:...` in the
 /// class process would serialise every acceptor and handler behind one

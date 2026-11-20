@@ -66,14 +66,17 @@ Two Beamtalk facts that shape the code (from `docs/ADR/0043`, `0065`):
   it, and `terminate:` never runs. A blocked acceptor also cannot answer sync
   calls, so nothing may call it.
 - **Class-side socket code must run in the caller** (found in Phase 1). A
-  class method of an open class, or one not declared `class sealed`, runs in
-  the class's own process (ADR 0129), not the caller's. For a transport that
-  breaks `controlling_process` and `file:sendfile` (`not_owner`: the caller
-  owns the socket) and would serialise every blocking `accept`/`recv` behind
-  one process. So `TCPTransport`, `SSLTransport`, `TransportOptions`, the
-  test transports and any class-side helper that touches a socket or
-  `self()` are `sealed Object subclass:` with `class sealed` methods. No
-  diagnostic catches a transport that forgets (BT-4031).
+  class method that runs in the class's own process instead breaks
+  `controlling_process` and `file:sendfile` (`not_owner`: the caller owns
+  the socket) and would serialise every blocking `accept`/`recv` behind one
+  process. Under ADR 0129 that was any class method not declared `class
+  sealed`; since ADR 0142 a class method runs in the caller unless its class
+  (or an ancestor) declares class variables or the selector is process-bound,
+  and `sealed` plays no part. So `TCPTransport`, `SSLTransport`,
+  `TransportOptions`, the test transports and any class-side helper that
+  touches a socket or `self()` must declare no class variables. They are also
+  `sealed Object subclass:`, which since BT-5008 seals every method, so the
+  per-method `class sealed` keyword is gone (BT-4031).
 - **Transport errors are bare reasons** (decided in Phase 2). Every
   `Result`-returning method of the `Transport` protocol, its
   implementations and `Socket`'s wrappers answers the raw Erlang reason on
@@ -285,10 +288,11 @@ below.
   `handshake:timeout:` is optional, as in Elixir, and `Socket handshake`
   detects it with `respondsTo:`, so it is documented on the protocol rather
   than required by it.
-- Transports are sealed with `class sealed` methods (see "Two Beamtalk facts"
-  above). Until BT-4029 was fixed, `self new`/`new:` in a direct-called class
-  method raised badarg, so `ServerConfig fromOptions:` was an open class
-  method; it is `class sealed` now.
+- Transports are sealed, stateless classes (see "Two Beamtalk facts" above);
+  they were written with `class sealed` methods, which BT-5008 made
+  redundant. Until BT-4029 was fixed, `self new`/`new:` in a direct-called
+  class method raised badarg, so `ServerConfig fromOptions:` was an open
+  class method; it runs in the caller now.
 - Transport errors were Exceptions for FFI failures and Symbols for stubs;
   Phase 2 made them all bare reasons (see "Transport errors are bare
   reasons" above).
