@@ -133,6 +133,23 @@ TestCase subclass: ServerTest
   testInvalidOptionsAreAnError =>
     self assert: (Catalina start: #{#port => 0}) isError
 
+  testStartErrorIsAnErrorInstance =>
+    failure := Catalina start: #{#port => 0}
+    self assert: failure isError
+    self assert: (failure error isKindOf: Error)
+
+  testAsErrorKeepsAnError =>
+    caught := (Result tryDo: [Error signal: "plain error"]) error
+    self assert: (Catalina asError: caught) =:= caught
+
+  testAsErrorWrapsAPlainException =>
+    caught := (Result tryDo: [Exception signal: "plain exception"]) error
+    self deny: (caught isKindOf: Error)
+    wrapped := Catalina asError: caught
+    self assert: (wrapped isKindOf: Error)
+    self assert: wrapped message equals: "plain exception"
+    self assert: wrapped reason =:= caught
+
   testTakenPortIsAnError =>
     ls := (TCPTransport listen: 0 options: #({#reuseaddr, false})) unwrap
     port := (TCPTransport sockname: ls) unwrap at: 2
