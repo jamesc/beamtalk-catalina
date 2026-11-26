@@ -123,9 +123,10 @@ typed Server subclass: Acceptor
     (self hasField: #listenSocket)
       ifTrue: [
         result := self.config transport accept: self.listenSocket
-        result isOk ifTrue: [
-          self onAccepted: result value
-        ] ifFalse: [self onAcceptError: result error]
+        result match: [
+          Result ok: raw -> self onAccepted: raw;
+          Result error: reason -> self onAcceptError: reason
+        ]
       ]
     nil
 

@@ -200,12 +200,13 @@ typed Server subclass: Handler
       ifFalse: [
         CatalinaTelemetry connectionsTraced
           ifTrue: [
+            {remoteAddress, remotePort} := remote
             acceptorSpan
               startChild: #connection
               measurements: #{#monotonic_time => start}
               metadata: #{
-                #remote_address => (remote at: 1),
-                #remote_port => (remote at: 2)
+                #remote_address => remoteAddress,
+                #remote_port => remotePort
               }
           ]
           ifFalse: [CatalinaTelemetry silent: #connection parent: acceptorSpan]
@@ -306,10 +307,11 @@ typed Server subclass: Handler
     span := sock telemetrySpan
     span isNil
       ifFalse: [
-        kind := (error isKindOf: ExitError) ifTrue: [
-          #exit
-        ] ifFalse: [
-          (error isKindOf: ThrowError) ifTrue: [#throw] ifFalse: [#error]
+        // `_exit`, not `_`: a typed wildcard does not parse (BT-5294).
+        kind := error match: [
+          _exit :: ExitError -> #exit;
+          _throw :: ThrowError -> #throw;
+          _ -> #error
         ]
         reason := kind =:= #error ifTrue: [error] ifFalse: [error reason]
         span
@@ -515,9 +517,10 @@ typed Server subclass: Handler
     sock close
     span isNil
       ifFalse: [
-        counters := stats isOk ifTrue: [
-          self counters: stats value
-        ] ifFalse: [#{}]
+        counters := stats match: [
+          Result ok: values -> self counters: values;
+          Result error: _ -> #{}
+        ]
         clean := #(#shutdown, #local_closed, #peer_closed) anySatisfy: [:r |
           r =:= closeReason
         ]
