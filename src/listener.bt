@@ -78,6 +78,7 @@ typed Actor subclass: Listener
         ^self failWith: info error
       ]
     local :: SocketAddress := info value
+    {localAddress, localPort} := local
     port := self bindPort: local
     2
       to: self.config numListenSockets
@@ -97,8 +98,8 @@ typed Actor subclass: Listener
       measurements: #{}
       metadata: #{
         #handler => self.config handler,
-        #local_address => (local at: 1),
-        #local_port => (local at: 2),
+        #local_address => localAddress,
+        #local_port => localPort,
         #transport_module => self.config transport,
         #transport_options => self.config transportOptions
       }

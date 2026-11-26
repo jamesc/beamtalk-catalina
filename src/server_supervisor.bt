@@ -114,10 +114,13 @@ typed Supervisor subclass: ServerSupervisor
   /// timescales. Draining at deploy time is `suspend`, then polling `info`
   /// until `#activeConnections` is 0.
   info -> Dictionary(Symbol, Object) =>
-    local := self listenerInfo
+    localInfo := self listenerInfo match: [
+      Result ok: address -> address;
+      Result error: _ -> nil
+    ]
     #{
       #status => self status,
-      #localInfo => (local isOk ifTrue: [local value] ifFalse: [nil]),
+      #localInfo => localInfo,
       #activeConnections => self activeConnections
     }
 

@@ -91,10 +91,11 @@ sealed typed Value subclass: Socket
       timeout: (timeout ifNil: [self.readTimeout])
     self isTraced
       ifTrue: [
-        result isOk ifTrue: [
-          self untimed: #recv measurements: #{#data => result value}
-        ] ifFalse: [
-          self event: #recv_error measurements: #{#error => result error}
+        result match: [
+          Result ok: data -> self untimed: #recv measurements: #{#data => data};
+          Result error: reason -> self event: #recv_error measurements: #{
+            #error => reason
+          }
         ]
       ]
     result
@@ -105,12 +106,11 @@ sealed typed Value subclass: Socket
     result := self.transport send: self.socket data: data
     self isTraced
       ifTrue: [
-        result isOk ifTrue: [
-          self untimed: #send measurements: #{#data => data}
-        ] ifFalse: [
-          self event: #send_error measurements: #{
+        result match: [
+          Result ok: _ -> self untimed: #send measurements: #{#data => data};
+          Result error: reason -> self event: #send_error measurements: #{
             #data => data,
-            #error => result error
+            #error => reason
           }
         ]
       ]
@@ -126,24 +126,19 @@ sealed typed Value subclass: Socket
       offset: offset
       length: length
     self isTraced ifFalse: [^result]
-    result isOk
-      ifTrue: [
-        self untimed: #sendfile measurements: #{
-          #filename => filename,
-          #offset => offset,
-          #bytes_written => result value
-        }
-      ]
-      ifFalse: [
-        self
-          event: #sendfile_error
-          measurements: #{
-            #filename => filename,
-            #offset => offset,
-            #length => length,
-            #error => result error
-          }
-      ]
+    result match: [
+      Result ok: written -> self untimed: #sendfile measurements: #{
+        #filename => filename,
+        #offset => offset,
+        #bytes_written => written
+      };
+      Result error: reason -> self event: #sendfile_error measurements: #{
+        #filename => filename,
+        #offset => offset,
+        #length => length,
+        #error => reason
+      }
+    ]
     result
 
   /// Shut the connection down in one direction: `#read`, `#write` or

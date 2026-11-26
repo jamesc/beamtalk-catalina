@@ -90,8 +90,8 @@ sealed typed Object subclass: SSLTransport
   /// `ssl:handshake/2`'s answer as a `Result`. Its `{ok, Socket, Extensions}`
   /// form is a 3-tuple, which the FFI boundary leaves alone (ADR 0076).
   class handshaken: answer :: Object -> Result(Port | Tuple, Object) =>
-    (answer isKindOf: Result) ifTrue: [^TransportResult bare: answer]
     answer match: [
+      r :: Result -> TransportResult bare: r;
       {#ok, socket, _extensions} -> Result ok: socket;
       _ -> Result error: answer
     ]
