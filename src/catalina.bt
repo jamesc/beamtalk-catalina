@@ -42,6 +42,8 @@ sealed typed Object subclass: Catalina
           ServerSupervisor spawnWith: config
         ]) mapError: [:e | self asError: e]
       ]
+      // `spawnWith:as:` is declared to answer a `Result` and its error is
+      // an `Error`, so the checker needs no `asError:` here.
       ifFalse: [ServerSupervisor spawnWith: config as: name]
 
   /// `exception` as an `Error`, for `start:`'s declared error type.

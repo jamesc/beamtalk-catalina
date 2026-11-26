@@ -162,6 +162,7 @@ TestCase subclass: ServerTest
         #transportOptions => #({#reuseaddr, false})
       }
     self assert: result isError
+    self assert: (result error isKindOf: Error)
     self assert: result error kind equals: #supervisor_start_failed
     self assert: (result error printString includesSubstring: "eaddrinuse")
     TCPTransport close: ls
