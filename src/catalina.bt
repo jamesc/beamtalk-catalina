@@ -30,10 +30,30 @@ sealed typed Object subclass: Catalina
   /// The `ServerConfig` options; see `ServerConfig fromOptions:` for one
   /// bullet per key.
   class start: options :: ServerOptions -> Result(ServerSupervisor, Error) =>
-    configured := Result tryDo: [ServerConfig fromOptions: options]
+    configured := (Result tryDo: [
+      ServerConfig fromOptions: options
+    ]) mapError: [:e | self asError: e]
     configured isError ifTrue: [^configured]
     config := configured value
     name := Erlang proplists get_value: #name with: config supervisorOptions
-    name =:= #undefined ifTrue: [
-      Result tryDo: [ServerSupervisor spawnWith: config]
-    ] ifFalse: [ServerSupervisor spawnWith: config as: name]
+    name =:= #undefined
+      ifTrue: [
+        (Result tryDo: [
+          ServerSupervisor spawnWith: config
+        ]) mapError: [:e | self asError: e]
+      ]
+      // `spawnWith:as:` is declared to answer a `Result` and its error is
+      // an `Error`, so the checker needs no `asError:` here.
+      ifFalse: [ServerSupervisor spawnWith: config as: name]
+
+  /// `exception` as an `Error`, for `start:`'s declared error type.
+  /// `Result tryDo:` catches every `Exception`, so a plain `Exception`
+  /// raised while starting is wrapped, with its message and the original
+  /// as the reason.
+  class asError: exception :: Exception -> Error =>
+    exception match: [
+      error :: Error -> error;
+      _ -> [
+        Error signal: exception message reason: exception
+      ] on: Error do: [:wrapped | wrapped]
+    ]
