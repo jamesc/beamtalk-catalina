@@ -1,4 +1,4 @@
-# Copilot Instructions for tmp_x
+# Copilot Instructions for catalina
 
 This is a [Beamtalk](https://www.beamtalk.dev) project that compiles to the BEAM virtual machine.
 
